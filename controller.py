@@ -18,7 +18,7 @@ NINTENDO_VENDOR_ID = 0x057e
 JOYCON2_RIGHT_PID = 0x2066
 JOYCON2_LEFT_PID = 0x2067
 PRO_CONTROLLER2_PID = 0x2069
-NSO_GAMECUBE_CONTROLLER_PID =  0x2073
+NSO_GAMECUBE_CONTROLLER_PID = 0x2073
 
 CONTROLER_NAMES = {
     JOYCON2_RIGHT_PID: "Joy-con 2 (Right)",
@@ -121,7 +121,6 @@ class ControllerInputData:
     accelerometer: tuple[int, int, int]
     gyroscope: tuple[int, int, int]
 
-
     def __init__(self, data: bytes, left_stick_calibration: StickCalibrationData, right_stick_calibration: StickCalibrationData):
         self.raw_data = data
         self.time = decodeu(data[0:4])
@@ -150,15 +149,15 @@ class ControllerInputData:
 
     def __str__(self):
         return f"""raw data : {to_hex(self.raw_data)}
-time: {self.time}             
+time: {self.time}              
 buttons_raw: {to_hex(self.buttons.to_bytes(length=4))}   
-buttons: {", ".join([k for k,v in SWITCH_BUTTONS.items() if v & self.buttons])}                                                             
+buttons: {", ".join([k for k,v in SWITCH_BUTTONS.items() if v & self.buttons])}                                                                    
 left_stick: {'{0: <5}'.format(self.left_stick[0])}, {'{0: <5}'.format(self.left_stick[1])}          
-right_stick: {'{0: <5}'.format(self.right_stick[0])}, {'{0: <5}'.format(self.right_stick[1])}             
-mouse (x,y,rugosity,distance): {'{0: <5}'.format(self.mouse_coords[0])}, {'{0: <5}'.format(self.mouse_coords[1])}, {'{0: <5}'.format(self.mouse_roughness)}, {'{0: <5}'.format(self.mouse_distance)}               
+right_stick: {'{0: <5}'.format(self.right_stick[0])}, {'{0: <5}'.format(self.right_stick[1])}              
+mouse (x,y,rugosity,distance): {'{0: <5}'.format(self.mouse_coords[0])}, {'{0: <5}'.format(self.mouse_coords[1])}, {'{0: <5}'.format(self.mouse_roughness)}, {'{0: <5}'.format(self.mouse_distance)}                
 magnometer (x,y,z): {'{0: <5}'.format(self.magnometer[0])}, {'{0: <5}'.format(self.magnometer[1])}, {'{0: <5}'.format(self.magnometer[2])}            
 battery voltage (V): {self.battery_voltage}
-battery current(mA): {self.battery_current}           
+battery current(mA): {self.battery_current}            
 temperature(°C): {self.temperature}      
 accelerometer (x,y,z): {'{0: <5}'.format(self.accelerometer[0])}, {'{0: <5}'.format(self.accelerometer[1])}, {'{0: <5}'.format(self.accelerometer[2])}            
 gyroscope (x,y,z): {'{0: <5}'.format(self.gyroscope[0])}, {'{0: <5}'.format(self.gyroscope[1])}, {'{0: <5}'.format(self.gyroscope[2])}            
@@ -243,12 +242,19 @@ class Controller:
         await self.client.connect()
         logger.debug(f"Connected to {self.device.address}")
 
-        # Reduce connection interval
-        from bleak.backends.winrt.client import BleakClientWinRT
-        from winrt.windows.devices.bluetooth import BluetoothLEPreferredConnectionParameters
-        backend = self.client._backend
-        if isinstance(backend, BleakClientWinRT):
-            backend._requester.request_preferred_connection_parameters(BluetoothLEPreferredConnectionParameters.throughput_optimized)
+        # Reduce connection interval (Added try-except for Windows 10 compatibility)
+        try:
+            from bleak.backends.winrt.client import BleakClientWinRT
+            from winrt.windows.devices.bluetooth import BluetoothLEPreferredConnectionParameters
+            backend = self.client._backend
+            if isinstance(backend, BleakClientWinRT):
+                backend._requester.request_preferred_connection_parameters(BluetoothLEPreferredConnectionParameters.throughput_optimized)
+        except AttributeError:
+            logger.warning("已忽略 Windows 10 不支援的藍牙屬性，將以預設相容模式執行。")
+        except ImportError:
+            logger.warning("無法載入 winrt 藍牙模組，略過最佳化連線設定。")
+        except Exception as e:
+            logger.warning(f"設定藍牙連線參數時發生錯誤: {e}")
 
         # Needed to get response from commands
         self.response_future = None
@@ -464,4 +470,3 @@ class Controller:
 
     def has_second_stick(self):
         return self.controller_info.product_id in [PRO_CONTROLLER2_PID, NSO_GAMECUBE_CONTROLLER_PID]
-
