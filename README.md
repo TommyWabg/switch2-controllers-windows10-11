@@ -1,4 +1,4 @@
-## 🌟 Fork Features (Windows 10 Support & Dual Layouts)
+## Fork Features (Windows 10 Support & Dual Layouts)
 
 This fork of `switch2-controllers` is optimized for Windows 10 users and offers two different button mapping versions to suit your preference:
 
@@ -7,7 +7,7 @@ This fork of `switch2-controllers` is optimized for Windows 10 users and offers 
     * **Xbox/Standard Layout Version:** Keeps the standard PC positioning. Pressing the physical "A" button (right position) triggers the "B" input on PC (matching the standard Xbox controller layout).
 * **Standalone Executable (.exe):** Fully packed with all dependencies (including `vgamepad` DLLs and `resources`). No Python installation required.
 
-### 🚀 Quick Start
+### Quick Start
 1. Download and install [Nefarius ViGEmBus driver](https://github.com/nefarius/ViGEmBus/releases).
 2. Download your preferred `.exe` from the **[Releases]** page.
 3. Run the `.exe` and follow the instructions. *Do not pair controllers in Windows Bluetooth settings; the app will discover them automatically.*
