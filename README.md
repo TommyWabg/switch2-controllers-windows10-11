@@ -1,15 +1,16 @@
-## Fork Features (Windows 10 Fix & Nintendo Layout)
+## 🌟 Fork Features (Windows 10 Support & Dual Layouts)
 
-This is a modified fork of the original `switch2-controllers`. It includes the following quality-of-life improvements:
+This fork of `switch2-controllers` is optimized for Windows 10 users and offers two different button mapping versions to suit your preference:
 
-* **Windows 10 Compatibility Fix:** Fixed the `AttributeError: property is not available in this version of Windows` crash. The app now runs smoothly on Windows 10 (e.g., 22H2) by safely handling BLE connection parameters that are normally exclusive to Windows 11.
-* **True Nintendo Button Layout:** Swapped the A/B and X/Y button mappings in the virtual controller configuration. It now matches the physical Nintendo Switch layout perfectly, rather than defaulting to the Xbox layout.
-* **Standalone Executable (.exe) Available:** Packed with PyInstaller (including all hidden dependencies like `vgamepad` and `resources`). You can download the ready-to-use `.exe` directly from the **[Releases]** page—no Python or `pip install` required!
+* **Windows 10 Compatibility Fix:** Resolved the `AttributeError: property is not available in this version of Windows` crash. This app now runs natively on Windows 10 (22H2 and above).
+* **Two Layout Options:** * **Nintendo Layout Version:** Swaps A/B and X/Y. Pressing the physical "A" button on your Joy-Con (right position) triggers the "A" input on PC. Perfect for those who want the labels to match.
+    * **Xbox/Standard Layout Version:** Keeps the standard PC positioning. Pressing the physical "A" button (right position) triggers the "B" input on PC (matching the standard Xbox controller layout).
+* **Standalone Executable (.exe):** Fully packed with all dependencies (including `vgamepad` DLLs and `resources`). No Python installation required.
 
-### How to use the compiled version
-1. Download the executable file from the **Releases** section.
-2. Ensure you have the [Nefarius ViGEmBus driver](https://github.com/nefarius/ViGEmBus/releases) installed on your PC.
-3. Simply double-click the `.exe` to run. *(Note: Do not pair the controllers in the Windows Bluetooth settings; let the app handle the connection.)*
+### 🚀 Quick Start
+1. Download and install [Nefarius ViGEmBus driver](https://github.com/nefarius/ViGEmBus/releases).
+2. Download your preferred `.exe` from the **[Releases]** page.
+3. Run the `.exe` and follow the instructions. *Do not pair controllers in Windows Bluetooth settings; the app will discover them automatically.*
 
 ---
 *(Below is the original project description)*
