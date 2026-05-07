@@ -21,6 +21,13 @@ This fork is heavily optimized for Windows 10/11 users, featuring a fully intera
 4. Hold the Sync button on your controller, or press any button if it's already paired. **Do not** pair controllers manually in Windows Bluetooth settings; the app uses automatic GATT discovery.
 5. Use the app's settings panel at the bottom to configure your preferred layout, gyro sensitivity, and custom mappings.
 
+## Important Setting for Steam Users:
+Because this app emulates an Xbox 360 controller, Steam Input might try to "help" by applying its own layout overrides, which can double-swap your buttons and mess up your in-game controls! 
+**To ensure your layout stays consistent:**
+1. Go to **Steam** > **Settings** > **Controller** > **Show Advanced Settings**.
+2. Make sure "**Enable Steam Input for Xbox controllers**" is turned **ON**.
+3. Now theSwitch_2_Controllers app will handle the layout switching for you!
+
 ## Gyro Calibration Guide
 
 To ensure maximum precision and eliminate "cursor drift," follow these steps to calibrate your controller:
