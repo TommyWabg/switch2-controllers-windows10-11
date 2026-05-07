@@ -6,9 +6,10 @@ This fork is heavily optimized for Windows 10/11 users, featuring a fully intera
 
 * **Windows 10 Native Compatibility:** Resolved the `AttributeError: property is not available...` crash. Runs flawlessly on Windows 10 (22H2 and above).
 * **On-the-Fly Layout Switching:** No more multiple executables! Instantly toggle between **Nintendo Layout** (matching physical labels) and **Xbox Layout** (standard PC positioning) directly from the UI.
-* **Advanced Gyro Mouse:** * Play games with high-polling rate, ultra-smooth gyro aiming (Interpolation Loop).
-  * Customize **Yaw/Roll modes**, Sensitivity, and toggle behaviors (Hold vs. Toggle).
-  * Built-in **1-Click Calibration** to eliminate stick/gyro drift.
+* **Racing Wheel Mode (Steering):** Reads the controller's absolute tilt (accelerometer) and maps it directly to the Left Analog Stick's X-axis.
+* **High-Precision Gyro Mouse (FPS):** Play shooters with a high-polling rate, 1000Hz interpolation loop for ultra-smooth, jitter-free gyro aiming.
+* * **Stick Assist:** Allowing the right thumbstick to work alongside gyro aiming.
+* **1-Click Gyro Calibration:** Built-in calibration tool to instantly calculate and permanently save sensor bias, eliminating gyro drift.
 * **Custom Extra Button Remapping:** Fully remap extra buttons like `GL`, `GR`, and `C` to function as Gyro triggers or standard buttons.
 * **Haptic & OS Integration:** Added rumble feedback (including a connection confirmation rumble) and mapped the Capture button to native Windows screenshots (`Win + PrtScn`).
 * **Standalone Executable (.exe):** Fully packed with all dependencies (including vgamepad DLLs). No Python installation required.
