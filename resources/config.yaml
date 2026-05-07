@@ -15,10 +15,10 @@ buttons:
     R: RB
     RIGHT: RIGHT
     R_STK: R_STK
-    SL_L: null
-    SL_R: null
-    SR_L: null
-    SR_R: null
+    SL_L: SL_L
+    SL_R: SL_R
+    SR_L: SR_L
+    SR_R: SR_R
     UP: UP
     X: X
     Y: Y
@@ -83,7 +83,7 @@ gyro_bias:
 - -13.310344827586206
 - -0.4482758620689655
 gyro_mode: Yaw
-gyro_sensitivity: 4.0
+gyro_sensitivity: 3.0
 mouse:
   buttons:
     left_joycon:
@@ -96,7 +96,9 @@ mouse:
       right_button: ZR
   enabled: true
   scroll_sensitivity: 2
-  sensitivity: 0.01
+  sensitivity: 2.2
+slr_mapping: Gyro
+srl_mapping: None
 stick_mouse_sensitivity: 5.0
 stick_r_bias:
 - 0.0
