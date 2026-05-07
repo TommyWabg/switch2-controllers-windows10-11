@@ -162,14 +162,14 @@ class ControllerWindow:
         self.update([None])
         
     def init_gyro_settings_panel(self):
-        self.gyro_frame = tk.LabelFrame(self.root, text=" Gyro Mouse Settings ", bg=background_color, font=("Arial", 12, "bold"), padx=10, pady=10)
+        self.gyro_frame = tk.LabelFrame(self.root, text=" Gyro Settings ", bg=background_color, font=("Arial", 12, "bold"), padx=10, pady=10)
         self.gyro_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
 
         tk.Label(self.gyro_frame, text="Mode:", bg=background_color, font=("Arial", 12, "bold")).grid(row=0, column=0, padx=5, sticky="e")
         self.gyro_mode_switch = ToggleSwitch(
             self.gyro_frame, 
-            labels=["Yaw", "Roll"], 
-            values=["FPS", "Driving"], 
+            labels=["FPS", "Steering"], 
+            values=["Yaw", "Roll"], 
             initial_value=CONFIG.gyro_mode, 
             command=self.update_mode_setting, 
             bg_color=background_color
@@ -177,7 +177,7 @@ class ControllerWindow:
         self.gyro_mode_switch.grid(row=0, column=1, columnspan=2, padx=5, sticky="w")
 
         tk.Label(self.gyro_frame, text="Sensitivity:", bg=background_color, font=("Arial", 12, "bold")).grid(row=0, column=3, padx=(20, 5), sticky="e")
-        self.sens_scale = tk.Scale(self.gyro_frame, from_=1, to=10, resolution=0.5, orient=tk.HORIZONTAL, length=120, bg=background_color, font=("Arial", 12, "bold"), command=self.on_gyro_setting_changed)
+        self.sens_scale = tk.Scale(self.gyro_frame, from_=1, to=10, resolution=0.2, orient=tk.HORIZONTAL, length=120, bg=background_color, font=("Arial", 12, "bold"), command=self.on_gyro_setting_changed)
         self.sens_scale.set(CONFIG.gyro_sensitivity)
         self.sens_scale.grid(row=0, column=4)
         
@@ -195,7 +195,7 @@ class ControllerWindow:
         self.gyro_act_switch.grid(row=1, column=1, columnspan=2, padx=5, pady=(10, 0), sticky="w")
         
         tk.Label(self.gyro_frame, text="Stick Assist:", bg=background_color, font=("Arial", 12, "bold")).grid(row=1, column=3, padx=(20, 5), pady=(10, 0), sticky="e")
-        self.stick_scale = tk.Scale(self.gyro_frame, from_=0, to=10, resolution=0.5, orient=tk.HORIZONTAL, length=120, bg=background_color, font=("Arial", 12, "bold"), command=self.on_gyro_setting_changed)
+        self.stick_scale = tk.Scale(self.gyro_frame, from_=0, to=10, resolution=0.2, orient=tk.HORIZONTAL, length=120, bg=background_color, font=("Arial", 12, "bold"), command=self.on_gyro_setting_changed)
         self.stick_scale.set(getattr(CONFIG, "stick_mouse_sensitivity", 5.0))
         self.stick_scale.grid(row=1, column=4, columnspan=3, pady=(10, 0), sticky="w")
         
