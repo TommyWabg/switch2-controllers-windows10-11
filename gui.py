@@ -152,7 +152,7 @@ class ControllerWindow:
         self.root.title("Switch2 Controllers")
         
         self.root.geometry("1000x580+50+50") 
-        self.root.minsize(1000, 580)
+        self.root.minsize(1000, 640)
         self.root.config(bg=background_color, padx=10, pady=10)
         self.font = tkFont.Font(family="Arial", size=16, weight="bold")
         self.pairing_hint_image = tk.PhotoImage(file=get_resource("images/pairing_hint.png"))
@@ -205,10 +205,46 @@ class ControllerWindow:
     def update_mode_setting(self, val):
         CONFIG.gyro_mode = val
         self.on_gyro_setting_changed()
+        
+    def update_mouse_setting(self, val):
+        CONFIG.mouse_config.enabled = val
+        
+        try:
+            with open(CONFIG.config_file_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+            
+            if 'mouse' not in data:
+                data['mouse'] = {}
+                
+            data['mouse']['enabled'] = val
+            
+            with open(CONFIG.config_file_path, 'w', encoding='utf-8') as f:
+                yaml.dump(data, f, default_flow_style=False)
+            logger.info(f"Mouse mode settings saved: {val}")
+        except Exception as e:
+            logger.error(f"Failed to save mouse settings: {e}")
 
     def update_act_setting(self, val):
         CONFIG.gyro_activation_mode = val
         self.on_gyro_setting_changed()
+    
+    def update_mouse_sensitivity(self, val):
+        new_sens = float(val)
+        CONFIG.mouse_config.sensitivity = new_sens
+        
+        try:
+            with open(CONFIG.config_file_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+            
+            if 'mouse' not in data:
+                data['mouse'] = {}
+            
+            data['mouse']['sensitivity'] = new_sens
+            
+            with open(CONFIG.config_file_path, 'w', encoding='utf-8') as f:
+                yaml.dump(data, f, default_flow_style=False)
+        except Exception as e:
+            logger.error(f"Failed to save mouse sensitivity: {e}")
 
     def on_gyro_setting_changed(self, *args):
         CONFIG.gyro_sensitivity = float(self.sens_scale.get())
@@ -246,38 +282,66 @@ class ControllerWindow:
     
     def init_settings_panel(self):
         self.settings_frame = tk.Frame(self.root, bg=background_color)
-        self.settings_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
+        self.settings_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
 
-        tk.Label(self.settings_frame, text="Custom Buttons :", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(10, 5))
+        # 第一行：Layout 與 Mouse 設定
+        row_global = tk.Frame(self.settings_frame, bg=background_color)
+        row_global.pack(side=tk.TOP, fill=tk.X, pady=5)
         
-        tk.Label(self.settings_frame, text="Layout:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(5, 2))
-        self.layout_switch = ToggleSwitch(
-            self.settings_frame, 
-            labels=["Xbox", "Switch"], 
-            values=["Xbox", "Switch"], 
-            initial_value=CONFIG.abxy_mode, 
-            command=self.update_layout_setting, 
-            bg_color=background_color
-        )
+        tk.Label(row_global, text="Layout:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(10, 2))
+        self.layout_switch = ToggleSwitch(row_global, ["Xbox", "Switch"], ["Xbox", "Switch"], CONFIG.abxy_mode, self.update_layout_setting, background_color)
         self.layout_switch.pack(side=tk.LEFT, padx=5)
 
-        tk.Label(self.settings_frame, text="GL:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(5, 2))
-        self.gl_combo = ttk.Combobox(self.settings_frame, values=BACK_BUTTON_OPTIONS, font=("Arial", 12, "bold"), state="readonly", width=11)
-        self.gl_combo.set(CONFIG.gl_mapping)
-        self.gl_combo.pack(side=tk.LEFT)
-        self.gl_combo.bind("<<ComboboxSelected>>", self.on_setting_changed)
+        tk.Label(row_global, text="Joy-con Mouse:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(20, 2))
+        self.mouse_switch = ToggleSwitch(row_global, ["ON", "OFF"], [True, False], CONFIG.mouse_config.enabled, self.update_mouse_setting, background_color)
+        self.mouse_switch.pack(side=tk.LEFT, padx=5)
+        
+        tk.Label(row_global, text="Sensitivity:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(10, 2))
+        self.mouse_sens_scale = tk.Scale(row_global, from_=1, to=10, resolution=0.2, orient=tk.HORIZONTAL, length=120, bg=background_color, font=("Arial", 12, "bold"), command=self.update_mouse_sensitivity)
+        self.mouse_sens_scale.set(CONFIG.mouse_config.sensitivity)
+        self.mouse_sens_scale.pack(side=tk.LEFT)
 
-        tk.Label(self.settings_frame, text="GR:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(15, 2))
-        self.gr_combo = ttk.Combobox(self.settings_frame, values=BACK_BUTTON_OPTIONS, font=("Arial", 12, "bold"), state="readonly", width=11)
-        self.gr_combo.set(CONFIG.gr_mapping)
-        self.gr_combo.pack(side=tk.LEFT)
-        self.gr_combo.bind("<<ComboboxSelected>>", self.on_setting_changed)
+        # 第二行：Pro Controller Buttons (GL, GR, C)
+        row_pro = tk.Frame(self.settings_frame, bg=background_color)
+        row_pro.pack(side=tk.TOP, fill=tk.X, pady=5)
+        
+        tk.Label(row_pro, text="Pro Controller Buttons:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(10, 5))
+        for key, label in [("gl", "GL:"), ("gr", "GR:"), ("c", "Chat (Joy-con/Pro):")]:
+            tk.Label(row_pro, text=label, bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(5, 2))
+            combo = ttk.Combobox(row_pro, values=BACK_BUTTON_OPTIONS, font=("Arial", 12, "bold"), state="readonly", width=10)
+            combo.set(getattr(CONFIG, f"{key}_mapping"))
+            combo.pack(side=tk.LEFT, padx=2)
+            combo.bind("<<ComboboxSelected>>", self.on_setting_changed)
+            setattr(self, f"{key}_combo", combo)
 
-        tk.Label(self.settings_frame, text="C Button:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(15, 2))
-        self.c_combo = ttk.Combobox(self.settings_frame, values=BACK_BUTTON_OPTIONS, font=("Arial", 12, "bold"), state="readonly", width=11)
-        self.c_combo.set(CONFIG.c_mapping)
-        self.c_combo.pack(side=tk.LEFT)
-        self.c_combo.bind("<<ComboboxSelected>>", self.on_setting_changed)
+        # 第三行：Joy-con Rail Buttons
+        row_jc = tk.Frame(self.settings_frame, bg=background_color)
+        row_jc.pack(side=tk.TOP, fill=tk.X, pady=5)
+        
+        tk.Label(row_jc, text="Joy-con Rail Buttons:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(10, 5))
+        
+        # === 先排：左 Joy-con (SR_L) ===
+        # 左 Joy-con 剃除 "Gyro" 選項
+        left_rail_options = [opt for opt in BACK_BUTTON_OPTIONS if opt != "Gyro"]
+        # 防呆：如果之前的設定檔存了 Gyro，強制洗白回 None
+        if getattr(CONFIG, "srl_mapping", "None") == "Gyro":
+            CONFIG.srl_mapping = "None"
+
+        # 注意：此處的 padx=(5, 2) 較小，為了緊靠標題
+        tk.Label(row_jc, text="Left SR:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(5, 2))
+        self.srl_combo = ttk.Combobox(row_jc, values=left_rail_options, font=("Arial", 12, "bold"), state="readonly", width=10)
+        self.srl_combo.set(CONFIG.srl_mapping)
+        self.srl_combo.pack(side=tk.LEFT, padx=2)
+        self.srl_combo.bind("<<ComboboxSelected>>", self.on_setting_changed)
+
+        # === 後排：右 Joy-con (SL_R) ===
+        # 右 Joy-con 維持完整選項
+        # 注意：此處的 padx=(15, 2) 較大，為了與左邊選單拉開距離
+        tk.Label(row_jc, text="Right SL:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(15, 2))
+        self.slr_combo = ttk.Combobox(row_jc, values=BACK_BUTTON_OPTIONS, font=("Arial", 12, "bold"), state="readonly", width=10)
+        self.slr_combo.set(CONFIG.slr_mapping)
+        self.slr_combo.pack(side=tk.LEFT, padx=2)
+        self.slr_combo.bind("<<ComboboxSelected>>", self.on_setting_changed)
         
     def update_layout_setting(self, val):
         CONFIG.abxy_mode = val
@@ -287,6 +351,8 @@ class ControllerWindow:
         CONFIG.gl_mapping = self.gl_combo.get()
         CONFIG.gr_mapping = self.gr_combo.get()
         CONFIG.c_mapping = self.c_combo.get()
+        CONFIG.slr_mapping = self.slr_combo.get()
+        CONFIG.srl_mapping = self.srl_combo.get()
         
         try:
             with open(CONFIG.config_file_path, 'r', encoding='utf-8') as f:
@@ -296,6 +362,8 @@ class ControllerWindow:
             data['gl_mapping'] = CONFIG.gl_mapping
             data['gr_mapping'] = CONFIG.gr_mapping
             data['c_mapping'] = CONFIG.c_mapping
+            data['slr_mapping'] = CONFIG.slr_mapping
+            data['srl_mapping'] = CONFIG.srl_mapping
             
             with open(CONFIG.config_file_path, 'w', encoding='utf-8') as f:
                 yaml.dump(data, f, default_flow_style=False)
