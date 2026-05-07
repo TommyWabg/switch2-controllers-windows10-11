@@ -226,6 +226,8 @@ class Config:
         self.gl_mapping = config.get("gl_mapping", "None")
         self.gr_mapping = config.get("gr_mapping", "Gyro")
         self.c_mapping = config.get("c_mapping", "None")
+        self.slr_mapping = config.get("slr_mapping", "Gyro")
+        self.srl_mapping = config.get("srl_mapping", "None")
         self.abxy_mode = config.get("abxy_mode", "Xbox") 
         
         self.gyro_mode = config.get("gyro_mode", "Yaw")
