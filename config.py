@@ -36,7 +36,7 @@ SWITCH_BUTTONS = {
 }
 
 BACK_BUTTON_OPTIONS = [
-    "None", "Gyro Mouse", "CAPT", "C", 
+    "None", "Gyro", "CAPT", "C", 
     "A", "B", "X", "Y", "L", "R", "ZL", "ZR", 
     "MINUS", "PLUS", "L_STK", "R_STK", "UP", "DOWN", "LEFT", "RIGHT"
 ]
@@ -155,7 +155,7 @@ class Config:
 
         self.mouse_config = MouseConfig(config.get("mouse", {}))
         self.gl_mapping = config.get("gl_mapping", "None")
-        self.gr_mapping = config.get("gr_mapping", "Gyro Mouse")
+        self.gr_mapping = config.get("gr_mapping", "Gyro")
         self.c_mapping = config.get("c_mapping", "None")
         self.abxy_mode = config.get("abxy_mode", "Xbox")
         
@@ -224,7 +224,7 @@ class Config:
 
         self.mouse_config = MouseConfig(config.get("mouse", {}))
         self.gl_mapping = config.get("gl_mapping", "None")
-        self.gr_mapping = config.get("gr_mapping", "Gyro Mouse")
+        self.gr_mapping = config.get("gr_mapping", "Gyro")
         self.c_mapping = config.get("c_mapping", "None")
         self.abxy_mode = config.get("abxy_mode", "Xbox") 
         
