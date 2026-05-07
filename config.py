@@ -2,15 +2,16 @@ from dataclasses import dataclass
 import os
 import yaml
 import logging
+import sys
 
 logger = logging.getLogger(__name__)
 
 
 SWITCH_BUTTONS = {
-    "X":     0x00000001,
-    "Y":     0x00000002,
-    "A":     0x00000004,
-    "B":     0x00000008,
+    "Y":     0x00000001,
+    "X":     0x00000002,
+    "B":     0x00000004,
+    "A":     0x00000008,
     "SR_R":  0x00000010,
     "SL_R":  0x00000020,
     "R":     0x00000040,
@@ -22,7 +23,6 @@ SWITCH_BUTTONS = {
     "HOME":  0x00001000,
     "CAPT":  0x00002000,
     "C":     0x00004000,
-    # unused 0x00008000,
     "DOWN":  0x00010000,
     "UP":    0x00020000,
     "RIGHT": 0x00040000,
@@ -34,6 +34,12 @@ SWITCH_BUTTONS = {
     "GR":    0x01000000,
     "GL":    0x02000000,
 }
+
+BACK_BUTTON_OPTIONS = [
+    "None", "Gyro Mouse", "CAPT", "C", 
+    "A", "B", "X", "Y", "L", "R", "ZL", "ZR", 
+    "MINUS", "PLUS", "L_STK", "R_STK", "UP", "DOWN", "LEFT", "RIGHT"
+]
 
 XB_BUTTONS = {
     "UP": 0x0001,
@@ -47,10 +53,10 @@ XB_BUTTONS = {
     "LB": 0x0100,
     "RB": 0x0200,
     "GUIDE": 0x0400,
-    "B": 0x1000,
-    "A": 0x2000,
-    "Y": 0x4000,
-    "X": 0x8000,
+    "A": 0x1000,
+    "B": 0x2000,
+    "X": 0x4000,
+    "Y": 0x8000,
 }
 
 @dataclass
@@ -64,22 +70,25 @@ class ButtonConfig:
         self.left_trigger = []
         self.right_trigger = []
 
+        default_keys = ["A", "B", "X", "Y", "L", "R", "ZL", "ZR", "MINUS", "PLUS", "L_STK", "R_STK", "UP", "DOWN", "LEFT", "RIGHT"]
+        for k in default_keys:
+            if k in XB_BUTTONS and k in SWITCH_BUTTONS:
+                self.buttons[SWITCH_BUTTONS[k]] = XB_BUTTONS[k]
+                
+        self.left_trigger.append(SWITCH_BUTTONS["ZL"])
+        self.right_trigger.append(SWITCH_BUTTONS["ZR"])
+
         for k, v in buttons_dict.items():
             if k not in SWITCH_BUTTONS:
-                raise Exception(f"Unknown switch button name in config: {k}")
+                continue
             
             switch_button = SWITCH_BUTTONS[k]
-            if v is not None:
-                if v == "LT":
-                    self.left_trigger.append(switch_button)
-                elif v == "RT":
-                    self.right_trigger.append(switch_button)
-                else:
-                    if v not in XB_BUTTONS:
-                        raise Exception(f"Unknown XB button name in config: {v}")
-                    xb_button = XB_BUTTONS[v]
-
-                    self.buttons[switch_button] = xb_button
+            if v == "LT":
+                self.left_trigger.append(switch_button)
+            elif v == "RT":
+                self.right_trigger.append(switch_button)
+            elif v in XB_BUTTONS:
+                self.buttons[switch_button] = XB_BUTTONS[v]
 
     def convert_buttons(self, switch_buttons: int):
         xb_buttons = 0x0000
@@ -99,9 +108,9 @@ class MouseButtonConfig:
     right_button: int
 
     def __init__(self, buttons_dict: dict[str, str]):
-        self.left_button = SWITCH_BUTTONS[buttons_dict["left_button"]]
-        self.middle_button = SWITCH_BUTTONS[buttons_dict["middle_button"]]
-        self.right_button = SWITCH_BUTTONS[buttons_dict["right_button"]]
+        self.left_button = SWITCH_BUTTONS.get(buttons_dict.get("left_button"), 0)
+        self.middle_button = SWITCH_BUTTONS.get(buttons_dict.get("middle_button"), 0)
+        self.right_button = SWITCH_BUTTONS.get(buttons_dict.get("right_button"), 0)
 
 @dataclass
 class MouseConfig:
@@ -112,44 +121,122 @@ class MouseConfig:
     joycon_r_buttons: MouseButtonConfig
 
     def __init__(self, config_dict: dict[str, str]):
-        self.enabled = config_dict["enabled"]
-        self.sensitivity = config_dict["sensitivity"]
-        self.scroll_sensitivity = config_dict["scroll_sensitivity"]
-        buttons_config = config_dict["buttons"]
-        self.joycon_l_buttons = MouseButtonConfig(buttons_config["left_joycon"])
-        self.joycon_r_buttons = MouseButtonConfig(buttons_config["right_joycon"])
+        self.enabled = config_dict.get("enabled", False)
+        self.sensitivity = config_dict.get("sensitivity", 1.0)
+        self.scroll_sensitivity = config_dict.get("scroll_sensitivity", 1.0)
+        buttons_config = config_dict.get("buttons", {})
+        self.joycon_l_buttons = MouseButtonConfig(buttons_config.get("left_joycon", {}))
+        self.joycon_r_buttons = MouseButtonConfig(buttons_config.get("right_joycon", {}))
 
-
-@dataclass
 class Config:
-    combine_joycons: bool
-    deadzone: int
-    dual_joycons_config: ButtonConfig
-    single_joycon_l_config: ButtonConfig
-    single_joycon_r_config: ButtonConfig
-    procon_config: ButtonConfig
-    mouse_config: MouseConfig
-
     def __init__(self, config_file_path: str):
+        self.config_file_path = config_file_path
+        
+        config = {} 
+        
+        if not os.path.exists(config_file_path):
+            logger.warning(f"Config file not found at {config_file_path}, using defaults.")
+        else:
+            try:
+                with open(config_file_path, 'r', encoding='utf-8') as cf:
+                    config = yaml.safe_load(cf) or {}
+            except Exception as e:
+                logger.error(f"Error loading config file: {e}")
 
-        with open(config_file_path) as cf:
-            config = yaml.safe_load(cf)
+        self.combine_joycons = config.get("combine_joycons", True)
+        self.deadzone = config.get("deadzone", 50)
+        self.controller_mode = config.get("controller_mode", "Xbox")
 
-            self.combine_joycons = config["combine_joycons"]
-            self.deadzone = config["deadzone"]
+        btns = config.get("buttons", {})
+        self.dual_joycons_config = ButtonConfig(btns.get("dual_joycons", {}))
+        self.single_joycon_l_config = ButtonConfig(btns.get("single_joycon_l", {}))
+        self.single_joycon_r_config = ButtonConfig(btns.get("single_joycon_r", {}))
+        self.procon_config = ButtonConfig(btns.get("procon", {}))
 
-            buttons_config = config["buttons"]
+        self.mouse_config = MouseConfig(config.get("mouse", {}))
+        self.gl_mapping = config.get("gl_mapping", "None")
+        self.gr_mapping = config.get("gr_mapping", "Gyro Mouse")
+        self.c_mapping = config.get("c_mapping", "None")
+        self.abxy_mode = config.get("abxy_mode", "Xbox")
+        
+        self.gyro_mode = config.get("gyro_mode", "Yaw")
+        self.gyro_sensitivity = float(config.get("gyro_sensitivity", 0.3))
+        self.gyro_smoothing = float(config.get("gyro_smoothing", 0.0))
+        self.gyro_activation_mode = config.get("gyro_activation_mode", "Toggle")
+        self.stick_mouse_sensitivity = float(config.get("stick_mouse_sensitivity", 5.0))
+        
+        self.gyro_bias = config.get("gyro_bias", [0.0, 0.0, 0.0])
+        self.stick_r_bias = config.get("stick_r_bias", [0.0, 0.0])
 
-            self.dual_joycons_config = ButtonConfig(buttons_config["dual_joycons"])
-            self.single_joycon_l_config = ButtonConfig(buttons_config["single_joycon_l"])
-            self.single_joycon_r_config = ButtonConfig(buttons_config["single_joycon_r"])
-            self.procon_config = ButtonConfig(buttons_config["procon"])
-
-            self.mouse_config = MouseConfig(config["mouse"])
-
-        logger.info(f"Config successfully read {self}")
+        logger.info(f"Config successfully loaded from {config_file_path}")
+        
+    def save_calibration(self):
+        try:
+            with open(self.config_file_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+            
+            data['gyro_bias'] = self.gyro_bias
+            data['stick_r_bias'] = self.stick_r_bias
+            
+            with open(self.config_file_path, 'w', encoding='utf-8') as f:
+                yaml.dump(data, f, default_flow_style=False)
+            logger.info("Calibration data saved to config.yaml permanently.")
+        except Exception as e:
+            logger.error(f"Failed to save calibration: {e}")
 
 def get_resource(resource_path: str):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, 'resources', resource_path)
     return os.path.join(os.path.dirname(__file__), 'resources', resource_path)
+
+class Config:
+    def __init__(self, config_file_path: str):
+        if hasattr(sys, 'frozen'):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(__file__)
+        
+        self.config_file_path = os.path.join(base_dir, 'config.yaml')
+        
+        if not os.path.exists(self.config_file_path):
+            bundled_config = get_resource("config.yaml")
+            if os.path.exists(bundled_config):
+                import shutil
+                shutil.copy(bundled_config, self.config_file_path)
+
+        config = {}
+        try:
+            with open(self.config_file_path, 'r', encoding='utf-8') as cf:
+                config = yaml.safe_load(cf) or {}
+        except Exception as e:
+            logger.error(f"Error loading config file: {e}")
+
+        
+        self.combine_joycons = config.get("combine_joycons", True)
+        self.deadzone = config.get("deadzone", 50)
+        self.controller_mode = config.get("controller_mode", "Xbox")
+
+        btns = config.get("buttons", {})
+        self.dual_joycons_config = ButtonConfig(btns.get("dual_joycons", {}))
+        self.single_joycon_l_config = ButtonConfig(btns.get("single_joycon_l", {}))
+        self.single_joycon_r_config = ButtonConfig(btns.get("single_joycon_r", {}))
+        self.procon_config = ButtonConfig(btns.get("procon", {}))
+
+        self.mouse_config = MouseConfig(config.get("mouse", {}))
+        self.gl_mapping = config.get("gl_mapping", "None")
+        self.gr_mapping = config.get("gr_mapping", "Gyro Mouse")
+        self.c_mapping = config.get("c_mapping", "None")
+        self.abxy_mode = config.get("abxy_mode", "Xbox") 
+        
+        self.gyro_mode = config.get("gyro_mode", "Yaw")
+        self.gyro_sensitivity = float(config.get("gyro_sensitivity", 0.3))
+        self.gyro_smoothing = 0.0 
+        self.gyro_activation_mode = config.get("gyro_activation_mode", "Toggle")
+        self.stick_mouse_sensitivity = float(config.get("stick_mouse_sensitivity", 20.0))
+        
+        self.gyro_bias = config.get("gyro_bias", [0.0, 0.0, 0.0])
+        self.stick_r_bias = config.get("stick_r_bias", [0.0, 0.0])
+
+        logger.info(f"Config successfully loaded from {self.config_file_path}")
     
 CONFIG = Config(get_resource("config.yaml"))
