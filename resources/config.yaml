@@ -82,7 +82,7 @@ gyro_bias:
 - 5.689655172413793
 - -13.310344827586206
 - -0.4482758620689655
-gyro_mode: Roll
+gyro_mode: Yaw
 gyro_sensitivity: 4.0
 mouse:
   buttons:
