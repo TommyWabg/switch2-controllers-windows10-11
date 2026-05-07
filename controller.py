@@ -182,6 +182,7 @@ class VibrationData:
         return value.to_bytes(byteorder='little', length=5)
 
 class Controller:
+    
     def __init__(self, device: BLEDevice):
         self.device: BLEDevice = device
         self.client: BleakClient = None
@@ -384,20 +385,44 @@ class Controller:
             inputData = ControllerInputData(data, self.stick_calibration, self.second_stick_calibration)
             self.battery_voltage = inputData.battery_voltage
 
+            btn_states = {
+                "GL": bool(inputData.buttons & 0x02000000),
+                "GR": bool(inputData.buttons & 0x01000000),
+                "C":  bool(inputData.buttons & 0x00004000),
+                "CAPT": bool(inputData.buttons & 0x00002000),
+                "SL_R": bool(inputData.buttons & 0x00000020),
+                "SR_L": bool(inputData.buttons & 0x00100000) 
+            }
+
+            inputData.buttons &= ~(0x03106020)
+
+            trigger_gyro = False
+            trigger_screenshot = btn_states["CAPT"]
+            trigger_key_c = False
+
+            mapping_pairs = [
+                (btn_states["GL"], getattr(CONFIG, "gl_mapping", "None")),
+                (btn_states["GR"], getattr(CONFIG, "gr_mapping", "None")),
+                (btn_states["C"],  getattr(CONFIG, "c_mapping", "None")),
+                (btn_states["SL_R"], getattr(CONFIG, "slr_mapping", "None")),
+                (btn_states["SR_L"], getattr(CONFIG, "srl_mapping", "None"))
+            ]
+
+            for is_pressed, action in mapping_pairs:
+                if is_pressed:
+                    if action == "Gyro": trigger_gyro = True
+                    elif action == "CAPT": trigger_screenshot = True
+                    elif action == "C": trigger_key_c = True
+                    elif action in SWITCH_BUTTONS:
+                        inputData.buttons |= SWITCH_BUTTONS[action]
+
             raw_left_pressed  = bool(inputData.buttons & 0x01)
             raw_up_pressed    = bool(inputData.buttons & 0x02)
             raw_down_pressed  = bool(inputData.buttons & 0x04)
             raw_right_pressed = bool(inputData.buttons & 0x08)
-
-            gl_pressed   = bool(inputData.buttons & 0x02000000)
-            gr_pressed   = bool(inputData.buttons & 0x01000000)
-            c_pressed    = bool(inputData.buttons & 0x00004000)
-            capt_pressed = bool(inputData.buttons & 0x00002000)
-
-            inputData.buttons &= ~(0x0F | 0x03000000 | 0x00006000)
-
-            abxy_mode = getattr(CONFIG, "abxy_mode", "Xbox")
+            inputData.buttons &= ~0x0F
             
+            abxy_mode = getattr(CONFIG, "abxy_mode", "Xbox")
             if abxy_mode == "Switch":
                 if raw_down_pressed:  inputData.buttons |= 0x08
                 if raw_right_pressed: inputData.buttons |= 0x04
@@ -409,41 +434,21 @@ class Controller:
                 if raw_up_pressed:    inputData.buttons |= 0x02
                 if raw_left_pressed:  inputData.buttons |= 0x01
 
-            gl_action = getattr(CONFIG, "gl_mapping", "None")
-            gr_action = getattr(CONFIG, "gr_mapping", "Gyro")
-            c_action  = getattr(CONFIG, "c_mapping", "None")
-
-            trigger_screenshot = capt_pressed
-            trigger_key_c = False
-            trigger_gyro = False
-
-            for is_p, action in [
-                (gl_pressed, gl_action), 
-                (gr_pressed, gr_action), 
-                (c_pressed, c_action)
-            ]:
-                if is_p:
-                    if action == "CAPT": trigger_screenshot = True
-                    elif action == "C": trigger_key_c = True
-                    elif action == "Gyro": trigger_gyro = True
-                    elif action in SWITCH_BUTTONS:
-                        inputData.buttons |= SWITCH_BUTTONS[action]
-
-            if trigger_screenshot and not self.prev_screenshot:
+            if trigger_screenshot and not getattr(self, 'prev_screenshot', False):
                 win32api.keybd_event(0x5B, 0, 0, 0)
                 win32api.keybd_event(0x2C, 0, 0, 0)
-            elif not trigger_screenshot and self.prev_screenshot:
+            elif not trigger_screenshot and getattr(self, 'prev_screenshot', False):
                 win32api.keybd_event(0x2C, 0, win32con.KEYEVENTF_KEYUP, 0)
                 win32api.keybd_event(0x5B, 0, win32con.KEYEVENTF_KEYUP, 0)
             self.prev_screenshot = trigger_screenshot
 
-            if trigger_key_c and not self.prev_key_c:
+            if trigger_key_c and not getattr(self, 'prev_key_c', False):
                 win32api.keybd_event(0x43, 0, 0, 0)
-            elif not trigger_key_c and self.prev_key_c:
+            elif not trigger_key_c and getattr(self, 'prev_key_c', False):
                 win32api.keybd_event(0x43, 0, win32con.KEYEVENTF_KEYUP, 0)
             self.prev_key_c = trigger_key_c
 
-            if inputData.buttons & (SWITCH_BUTTONS["SR_R"] | SWITCH_BUTTONS["SR_L"] | SWITCH_BUTTONS["SL_R"] | SWITCH_BUTTONS["SL_L"]):
+            if inputData.buttons & (SWITCH_BUTTONS.get("SR_R", 0) | SWITCH_BUTTONS.get("SL_R", 0) | SWITCH_BUTTONS.get("SL_L", 0) | SWITCH_BUTTONS.get("SR_L", 0)):
                 self.side_buttons_pressed = True
 
             self.simulate_mouse(inputData)
@@ -477,8 +482,8 @@ class Controller:
                     dy = signed_looping_difference_16bit(self.previous_mouse_state.y ,y)
 
                     if dx != 0 or dy != 0:
-                        self.jc_target_vx = dx * mouse_config.sensitivity * 0.03
-                        self.jc_target_vy = dy * mouse_config.sensitivity * 0.03
+                        self.jc_target_vx = dx * mouse_config.sensitivity * 0.003
+                        self.jc_target_vy = dy * mouse_config.sensitivity * 0.003
                     else:
                         self.jc_target_vx = 0.0
                         self.jc_target_vy = 0.0
@@ -509,7 +514,7 @@ class Controller:
             self.jc_target_vy = 0.0
 
     def simulate_gyro_mouse(self, inputData: ControllerInputData, trigger_pressed: bool):
-        if not self.is_pro_controller():
+        if not (self.is_pro_controller() or self.is_joycon_right()):
             return
 
         activation_mode = getattr(CONFIG, "gyro_activation_mode", "Toggle")
@@ -577,25 +582,18 @@ class Controller:
             current_mode = getattr(CONFIG, "gyro_mode", "Yaw")
 
             if current_mode == "Roll":
-                # === 賽車模式 (Roll)：將絕對傾斜角度映射到左搖桿 X 軸 ===
                 ax, ay, az = inputData.accelerometer
                 
-                # Switch 手把的 Accelerometer 1G 約為 4000。
-                # 當你像握方向盤一樣握著手把並左右轉動時，重力會分配到 X 軸 (ax)。
                 tilt_normalized = ax / 4000.0  
                 
-                # 依照 UI 設定的靈敏度放大傾斜幅度 (0.5 是一個基準調整值，可依手感修改)
                 sensitivity = getattr(CONFIG, "gyro_sensitivity", 4.0)
                 steer_value = tilt_normalized * (sensitivity * -2)
                 
-                # 限制數值在 -1.0 到 1.0 之間 (避免超出搖桿極限)
                 steer_value = max(-1.0, min(1.0, steer_value))
                 
-                # 覆蓋左搖桿的 X 軸，並保留原本的 Y 軸 (讓玩家實體推搖桿的上下仍有效)
                 inputData.left_stick = (steer_value, inputData.left_stick[1])
 
             else:
-                # === FPS 模式 (Yaw)：將陀螺儀角速度映射到滑鼠 ===
                 if abs(gyro_x) > gyro_deadzone or abs(gyro_z) > gyro_deadzone:
                     sensitivity = getattr(CONFIG, "gyro_sensitivity", 0.3)
                     horizontal_val = -gyro_z 
