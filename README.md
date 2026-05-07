@@ -11,7 +11,7 @@ This fork is heavily optimized for Windows 10/11 users, featuring a fully intera
 * **Stick Assist:** Allowing the right thumbstick to work alongside gyro aiming.
 * **1-Click Gyro Calibration:** Built-in calibration tool to instantly calculate and permanently save sensor bias, eliminating gyro drift.
 * **Custom Extra Button Remapping:** Fully remap extra buttons like `GL`, `GR`, `SL_R`, `SR_L` and `Chat` to function as Gyro triggers or standard buttons.
-* **Joy-con Mouse Toggle:** A new dedicated switch in the GUI to instantly enable or disable the Joy-con mouse mode. This prevents accidental cursor movement during gameplay.
+* **Joy-con Mouse Toggle:** A new dedicated switch in the GUI to enable or disable the Joy-con mouse mode. This prevents accidental cursor movement during gameplay.
 * **Haptic & OS Integration:** Added rumble feedback (including a connection confirmation rumble) and mapped the Capture button to native Windows screenshots (`Win + PrtScn`).
 * **Standalone Executable (.exe):** Fully packed with all dependencies (including vgamepad DLLs). No Python installation required.
 
