@@ -75,9 +75,9 @@ c_mapping: None
 combine_joycons: true
 controller_mode: Xbox
 deadzone: 50
-gl_mapping: ZL
-gr_mapping: Gyro Mouse
-gyro_activation_mode: Toggle
+gl_mapping: None
+gr_mapping: Gyro
+gyro_activation_mode: Hold
 gyro_bias:
 - 5.689655172413793
 - -13.310344827586206
