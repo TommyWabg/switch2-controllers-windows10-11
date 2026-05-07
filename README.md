@@ -1,17 +1,33 @@
-## Fork Features (Windows 10 Support & Dual Layouts)
+# switch2-controllers (Windows 10 & Pro Features Fork)
 
-This fork of `switch2-controllers` is optimized for Windows 10 users and offers two different button mapping versions to suit your preference:
+This fork is heavily optimized for Windows 10/11 users, featuring a fully interactive GUI, advanced Gyro mouse aiming, and on-the-fly layout switching. 
 
-* **Windows 10 Compatibility Fix:** Resolved the `AttributeError: property is not available in this version of Windows` crash. This app now runs natively on Windows 10 (22H2 and above).
-* **Two Layout Options:**
-    * **Nintendo Layout Version:** Swaps A/B and X/Y. Pressing the physical "A" button on your Joy-Con (right position) triggers the "A" input on PC. Perfect for those who want the labels to match.
-    * **Xbox/Standard Layout Version:** Keeps the standard PC positioning. Pressing the physical "A" button (right position) triggers the "B" input on PC (matching the standard Xbox controller layout).
-* **Standalone Executable (.exe):** Fully packed with all dependencies (including `vgamepad` DLLs and `resources`). No Python installation required.
+## Key Features
 
-### Quick Start
-1. Download and install [Nefarius ViGEmBus driver](https://github.com/nefarius/ViGEmBus/releases).
-2. Download your preferred `.exe` from the **[Releases]** page.
-3. Run the `.exe` and follow the instructions. *Do not pair controllers in Windows Bluetooth settings; the app will discover them automatically.*
+* **Windows 10 Native Compatibility:** Resolved the `AttributeError: property is not available...` crash. Runs flawlessly on Windows 10 (22H2 and above).
+* **On-the-Fly Layout Switching:** No more multiple executables! Instantly toggle between **Nintendo Layout** (matching physical labels) and **Xbox Layout** (standard PC positioning) directly from the UI.
+* **Advanced Gyro Mouse:** * Play games with high-polling rate, ultra-smooth gyro aiming (Interpolation Loop).
+  * Customize **Yaw/Roll modes**, Sensitivity, and toggle behaviors (Hold vs. Toggle).
+  * Built-in **1-Click Calibration** to eliminate stick/gyro drift.
+* **Custom Extra Button Remapping:** Fully remap extra buttons like `GL`, `GR`, and `C` to function as Gyro triggers or standard buttons.
+* **Haptic & OS Integration:** Added rumble feedback (including a connection confirmation rumble) and mapped the Capture button to native Windows screenshots (`Win + PrtScn`).
+* **Standalone Executable (.exe):** Fully packed with all dependencies (including vgamepad DLLs). No Python installation required.
+
+## Quick Start
+
+1. Download and install the [Nefarius ViGEmBus driver](https://github.com/nefarius/ViGEmBus/releases).
+2. Download the `.exe` from the **[Releases]** page.
+3. Launch the app **before** connecting your controller. 
+4. Hold the Sync button on your controller, or press any button if it's already paired. **Do not** pair controllers manually in Windows Bluetooth settings; the app uses automatic GATT discovery.
+5. Use the app's settings panel at the bottom to configure your preferred layout, gyro sensitivity, and custom mappings.
+
+## Gyro Calibration Guide
+
+To ensure maximum precision and eliminate "cursor drift," follow these steps to calibrate your controller:
+1.  **Stationary Placement:** Place your Pro Controller on a completely flat, stable surface. **Do not touch or move it during the process.**
+2.  **Trigger Calibration:** Click the **[Calibrate Gyro]** button in the settings panel.
+3.  **Wait for Countdown:** The UI will display a countdown (`Calibrating (2..)`). 
+4.  **Completion:** Once the button displays `Calibration Done`, the software has calculated the hardware bias and saved it. You do not need to recalibrate unless you experience new drifting issues.
 
 ---
 *(Below is the original project description)*
