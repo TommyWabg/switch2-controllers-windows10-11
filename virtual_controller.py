@@ -12,6 +12,7 @@ class VirtualController:
         self.player_number = player_number
         self.controllers = []
         self.xb_controller = vgamepad.VX360Gamepad()
+        self.xb_controller.register_notification(callback_function=self.vibration_callback)
         self.previous_buttons_left = 0x00000000
         self.previous_buttons_right = 0x00000000
         self.next_vibration_event = None
