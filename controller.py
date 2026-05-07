@@ -410,7 +410,7 @@ class Controller:
                 if raw_left_pressed:  inputData.buttons |= 0x01
 
             gl_action = getattr(CONFIG, "gl_mapping", "None")
-            gr_action = getattr(CONFIG, "gr_mapping", "Gyro Mouse")
+            gr_action = getattr(CONFIG, "gr_mapping", "Gyro")
             c_action  = getattr(CONFIG, "c_mapping", "None")
 
             trigger_screenshot = capt_pressed
@@ -425,7 +425,7 @@ class Controller:
                 if is_p:
                     if action == "CAPT": trigger_screenshot = True
                     elif action == "C": trigger_key_c = True
-                    elif action == "Gyro Mouse": trigger_gyro = True
+                    elif action == "Gyro": trigger_gyro = True
                     elif action in SWITCH_BUTTONS:
                         inputData.buttons |= SWITCH_BUTTONS[action]
 
@@ -574,25 +574,44 @@ class Controller:
             gyro_x, gyro_y, gyro_z = inputData.gyroscope
             gyro_deadzone = 0.2 
             
-            if abs(gyro_x) > gyro_deadzone or abs(gyro_z) > gyro_deadzone or abs(gyro_y) > gyro_deadzone:
-                sensitivity = getattr(CONFIG, "gyro_sensitivity", 0.3)
-                current_mode = getattr(CONFIG, "gyro_mode", "FPS")
+            current_mode = getattr(CONFIG, "gyro_mode", "Yaw")
+
+            if current_mode == "Roll":
+                # === 賽車模式 (Roll)：將絕對傾斜角度映射到左搖桿 X 軸 ===
+                ax, ay, az = inputData.accelerometer
                 
-                horizontal_val = -gyro_z if current_mode == "FPS" else gyro_y
+                # Switch 手把的 Accelerometer 1G 約為 4000。
+                # 當你像握方向盤一樣握著手把並左右轉動時，重力會分配到 X 軸 (ax)。
+                tilt_normalized = ax / 4000.0  
                 
-                eff_h = 0
-                if horizontal_val > gyro_deadzone: eff_h = horizontal_val - gyro_deadzone
-                elif horizontal_val < -gyro_deadzone: eff_h = horizontal_val + gyro_deadzone
+                # 依照 UI 設定的靈敏度放大傾斜幅度 (0.5 是一個基準調整值，可依手感修改)
+                sensitivity = getattr(CONFIG, "gyro_sensitivity", 4.0)
+                steer_value = tilt_normalized * (sensitivity * -2)
+                
+                # 限制數值在 -1.0 到 1.0 之間 (避免超出搖桿極限)
+                steer_value = max(-1.0, min(1.0, steer_value))
+                
+                # 覆蓋左搖桿的 X 軸，並保留原本的 Y 軸 (讓玩家實體推搖桿的上下仍有效)
+                inputData.left_stick = (steer_value, inputData.left_stick[1])
+
+            else:
+                # === FPS 模式 (Yaw)：將陀螺儀角速度映射到滑鼠 ===
+                if abs(gyro_x) > gyro_deadzone or abs(gyro_z) > gyro_deadzone:
+                    sensitivity = getattr(CONFIG, "gyro_sensitivity", 0.3)
+                    horizontal_val = -gyro_z 
                     
-                eff_v = 0
-                if gyro_x > gyro_deadzone: eff_v = gyro_x - gyro_deadzone
-                elif gyro_x < -gyro_deadzone: eff_v = gyro_x + gyro_deadzone
-                
-                speed_magnitude = (abs(eff_h) + abs(eff_v))
-                accel_factor = 0.002 
-                
-                target_vx += eff_h * sensitivity * accel_factor
-                target_vy += eff_v * -sensitivity * accel_factor
+                    eff_h = 0
+                    if horizontal_val > gyro_deadzone: eff_h = horizontal_val - gyro_deadzone
+                    elif horizontal_val < -gyro_deadzone: eff_h = horizontal_val + gyro_deadzone
+                        
+                    eff_v = 0
+                    if gyro_x > gyro_deadzone: eff_v = gyro_x - gyro_deadzone
+                    elif gyro_x < -gyro_deadzone: eff_v = gyro_x + gyro_deadzone
+                    
+                    accel_factor = 0.002 
+                    
+                    target_vx += eff_h * sensitivity * accel_factor
+                    target_vy += eff_v * -sensitivity * accel_factor
 
             stick_deadzone = 0.05 
             stick_sens = getattr(CONFIG, "stick_mouse_sensitivity", 20.0) * 0.66
