@@ -1,81 +1,90 @@
-combine_joycons: true
-deadzone: 50
+abxy_mode: Switch
 buttons:
   dual_joycons:
-    Y: X
-    X: Y
-    B: A
-    A: B
-    SR_R:
-    SL_R:
-    R: RB
-    ZR: RT
+    A: A
+    B: B
+    C: null
+    CAPT: null
+    DOWN: DOWN
+    HOME: GUIDE
+    L: LB
+    LEFT: LEFT
+    L_STK: L_STK
     MINUS: BACK
     PLUS: START
-    R_STK: R_STK
-    L_STK: L_STK
-    HOME: GUIDE
-    CAPT:
-    C:
-    DOWN: DOWN
-    UP: UP
+    R: RB
     RIGHT: RIGHT
-    LEFT: LEFT
-    SR_L:
-    SL_L:
-    L: LB
+    R_STK: R_STK
+    SL_L: null
+    SL_R: null
+    SR_L: null
+    SR_R: null
+    UP: UP
+    X: X
+    Y: Y
     ZL: LT
-  single_joycon_l:
-    MINUS: BACK
+    ZR: RT
+  procon:
+    A: A
+    B: B
+    C: null
+    CAPT: null
+    DOWN: DOWN
+    GL: null
+    GR: Gyro Mouse
+    HOME: GUIDE
+    L: LB
+    LEFT: LEFT
     L_STK: L_STK
+    MINUS: BACK
+    PLUS: START
+    R: RB
+    RIGHT: RIGHT
+    R_STK: R_STK
+    UP: UP
+    X: X
+    Y: Y
+    ZL: LT
+    ZR: RT
+  single_joycon_l:
     CAPT: START
     DOWN: B
-    UP: X
-    RIGHT: Y
-    LEFT: A
-    SR_L: RB
-    SL_L: LB
     L: LT
+    LEFT: A
+    L_STK: L_STK
+    MINUS: BACK
+    RIGHT: Y
+    SL_L: LB
+    SR_L: RB
+    UP: X
     ZL: RT
   single_joycon_r:
-    Y: Y
-    X: B
-    B: X
     A: A
-    SR_R: RB
-    SL_R: LB
-    R: LT
-    ZR: RT
-    PLUS: START
-    R_STK: L_STK
-    HOME: GUIDE
+    B: X
     C: BACK
-  procon:
-    Y: X
-    X: Y
-    B: A
-    A: B
-    R: RB
-    ZR: RT
-    MINUS: BACK
-    PLUS: START
-    R_STK: R_STK
-    L_STK: L_STK
     HOME: GUIDE
-    CAPT:
-    C:
-    DOWN: DOWN
-    UP: UP
-    RIGHT: RIGHT
-    LEFT: LEFT
-    L: LB
-    ZL: LT
-    GR: A
-    GL: B
+    PLUS: START
+    R: LT
+    R_STK: L_STK
+    SL_R: LB
+    SR_R: RB
+    X: B
+    Y: Y
+    ZR: RT
+c_mapping: None
+combine_joycons: true
+controller_mode: Xbox
+deadzone: 50
+gl_mapping: ZL
+gr_mapping: Gyro Mouse
+gyro_activation_mode: Toggle
+gyro_bias:
+- 5.689655172413793
+- -13.310344827586206
+- -0.4482758620689655
+gyro_mode: Roll
+gyro_sensitivity: 4.0
 mouse:
-  enabled: true
-  sensitivity: 0.8
-  scroll_sensitivity: 0.5
   buttons:
     left_joycon:
       left_button: L
@@ -85,3 +94,10 @@ mouse:
       left_button: R
       middle_button: R_STK
       right_button: ZR
+  enabled: true
+  scroll_sensitivity: 2
+  sensitivity: 0.01
+stick_mouse_sensitivity: 5.0
+stick_r_bias:
+- 0.0
+- 0.0
