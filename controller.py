@@ -1,3 +1,4 @@
+import bleak
 from bleak import BleakScanner, BleakClient, BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 import asyncio
@@ -248,18 +249,12 @@ class Controller:
                 asyncio.create_task(self.disconnected_callback(self))
         
         self.client = BleakClient(self.device, disconnected_callback=disconnected_callback)
-        await self.client.connect()
-        logger.debug(f"Connected to {self.device.address}")
-
-        try:
-            from bleak.backends.winrt.client import BleakClientWinRT
-            from winrt.windows.devices.bluetooth import BluetoothLEPreferredConnectionParameters
-            backend = self.client._backend
-            if isinstance(backend, BleakClientWinRT):
-                backend._requester.request_preferred_connection_parameters(BluetoothLEPreferredConnectionParameters.throughput_optimized)
-        except Exception:
-            pass
-
+        await self.client.connect(timeout=20.0)
+        
+        logger.info(f"Connected to {self.device.address}")
+        
+        await asyncio.sleep(1.0)
+        
         self.response_future = None
         def command_response_callback(sender: BleakGATTCharacteristic, data: bytearray):
             if self.response_future:
@@ -308,8 +303,11 @@ class Controller:
         return await cls.create_from_device(device)
         
     async def disconnect(self):
-        if self.client and self.client.is_connected:
-            await self.client.disconnect()
+        if self.client:
+            if self.client.is_connected:
+                logger.info(f"正在與 {self.device.address} 斷開藍牙連結...")
+                await self.client.disconnect()
+            self.client = None
 
     ### Commands & Features ###
 
