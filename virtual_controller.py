@@ -8,14 +8,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 class VirtualController:
-    def __init__(self, player_number: int):
+    def __init__(self, player_number: int, on_disconnected_callback=None):
         self.player_number = player_number
         self.controllers = []
+        self.on_disconnected_callback = on_disconnected_callback
         self.xb_controller = vgamepad.VX360Gamepad()
         self.xb_controller.register_notification(callback_function=self.vibration_callback)
         self.previous_buttons_left = 0x00000000
         self.previous_buttons_right = 0x00000000
         self.next_vibration_event = None
+        
+        self.loop = None
 
     def vibration_callback(self, client, target, large_motor, small_motor, led_number, user_data):
         vibrationData = VibrationData()
@@ -38,9 +41,13 @@ class VirtualController:
                 await asyncio.gather(*tasks)
                 await asyncio.sleep(0.02)
 
-        threading.Thread(target=lambda: asyncio.run(send_vibration_task()), daemon=True).start()
+        if self.loop and self.loop.is_running():
+            asyncio.run_coroutine_threadsafe(send_vibration_task(), self.loop)
 
     async def init_added_controller(self, controller: Controller):
+        
+        self.loop = asyncio.get_running_loop()
+        
         await self.update_leds()
         def input_report_callback(inputData: ControllerInputData, controller: Controller):
             current_buttons = inputData.buttons 
@@ -88,3 +95,38 @@ class VirtualController:
         for c in self.controllers:
             if hasattr(c, 'start_calibration'):
                 c.start_calibration()
+                
+    async def disconnect(self):
+        for c in list(self.controllers):
+            if hasattr(c, 'client') and c.client:
+                try:
+                    await c.client.disconnect()
+                except Exception as e:
+                    logger.error(f"Disconnect error: {e}")
+            if self.on_disconnected_callback:
+                await self.on_disconnected_callback(c)
+
+    def trigger_disconnect(self):
+        if self.loop and self.loop.is_running():
+            asyncio.run_coroutine_threadsafe(self.disconnect(), self.loop)
+        else:
+            logger.error("Event loop not found or not running.")
+
+    async def remove_controller(self, controller: Controller) -> bool:
+        if controller in self.controllers:
+            self.controllers.remove(controller)
+            
+        if len(self.controllers) == 0:
+            if hasattr(self, 'xb_controller') and self.xb_controller is not None:
+                try:
+                    self.xb_controller.unregister_notification()
+                except Exception:
+                    pass
+                
+                del self.xb_controller
+                self.xb_controller = None
+                
+            return True 
+        else:
+            await self.init_added_controller(self.controllers[0])
+            return False
