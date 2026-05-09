@@ -5,6 +5,8 @@ from tkinter import ttk
 import tkinter.font as tkFont
 import yaml
 import logging
+import asyncio
+import os
 from controller import Controller
 from discoverer import start_discoverer
 from config import get_resource, CONFIG, BACK_BUTTON_OPTIONS
@@ -304,7 +306,11 @@ class ControllerWindow:
         row_global = tk.Frame(self.settings_frame, bg=background_color)
         row_global.pack(side=tk.TOP, fill=tk.X, pady=5)
         
-        tk.Label(row_global, text="Layout:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(10, 2))
+        tk.Label(row_global, text="Emu Mode:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(10, 2))
+        self.sim_mode_switch = ToggleSwitch(row_global, ["Xbox", "PS4"], ["Xbox", "PS4"], getattr(CONFIG, "simulation_mode", "Xbox"), self.update_sim_mode_setting, background_color)
+        self.sim_mode_switch.pack(side=tk.LEFT, padx=5)
+        
+        tk.Label(row_global, text="Layout:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(20, 2))
         self.layout_switch = ToggleSwitch(row_global, ["Xbox", "Switch"], ["Xbox", "Switch"], CONFIG.abxy_mode, self.update_layout_setting, background_color)
         self.layout_switch.pack(side=tk.LEFT, padx=5)
 
@@ -350,6 +356,27 @@ class ControllerWindow:
         self.slr_combo.pack(side=tk.LEFT, padx=2)
         self.slr_combo.bind("<<ComboboxSelected>>", self.on_setting_changed)
         
+    
+    def update_sim_mode_setting(self, val):
+        CONFIG.simulation_mode = val
+        try:
+            with open(CONFIG.config_file_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+            
+            data['simulation_mode'] = val
+            
+            with open(CONFIG.config_file_path, 'w', encoding='utf-8') as f:
+                yaml.dump(data, f, default_flow_style=False)
+            
+            if hasattr(self, 'current_controllers'):
+                for vc in self.current_controllers:
+                    if vc is not None:
+                        vc.set_mode(val)
+            
+            logger.info(f"模擬模式已切換為: {val}，已即時套用。")
+        except Exception as e:
+            logger.error(f"儲存或切換模擬模式失敗: {e}")
+    
     def update_layout_setting(self, val):
         CONFIG.abxy_mode = val
         self.on_setting_changed()
@@ -420,13 +447,35 @@ class ControllerWindow:
         t.start()
 
         def on_quit():
-            self.is_quitting = True
-            self.quit_event.set()
-            self.root.quit()
-            self.root.destroy()
+            if getattr(self, 'is_cleaning_up', False):
+                return
+            self.is_cleaning_up = True
             
-            import os
-            os._exit(0)
+            self.root.title("Switch2 Controllers - Disconnecting...")
+            logger.info("執行關閉程序：正在通知所有控制器中斷藍牙連線...")
+
+            def perform_cleanup():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    tasks = []
+                    if hasattr(self, 'current_controllers'):
+                        for vc in self.current_controllers:
+                            if vc is not None:
+                                tasks.append(vc.disconnect())
+                    
+                    if tasks:
+                        loop.run_until_complete(asyncio.gather(*tasks))
+                        logger.info("所有實體連線已安全解除。")
+                    
+                    loop.close()
+                except Exception as e:
+                    logger.error(f"清理時發生錯誤: {e}")
+                finally:
+                    self.root.after(0, lambda: (self.root.destroy(), os._exit(0)))
+
+            threading.Thread(target=perform_cleanup, daemon=True).start()
 
         self.root.protocol("WM_DELETE_WINDOW", on_quit)
         self.root.mainloop()
