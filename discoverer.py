@@ -26,14 +26,17 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
 
         async def disconnected_controller(controller: Controller):
             logger.info(f"Controller disconected {controller.client.address}")
-            connected_mac_addresses.remove(controller.client.address)
+            
+            if controller.client.address in connected_mac_addresses:
+                connected_mac_addresses.remove(controller.client.address)
+                
             for i, vc in enumerate(virtual_controllers[:]):
                 if vc is not None and await vc.remove_controller(controller):
                     virtual_controllers[i] = None
                     
             logger.info(virtual_controllers)
             if update_controllers_threadsafe is not None:
-                update_controllers_threadsafe(virtual_controllers)
+                update_controllers_threadsafe(list(virtual_controllers))
 
         lock = asyncio.Lock()
 
@@ -50,16 +53,14 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
                 await lock.acquire()
                 try:
                     if CONFIG.combine_joycons and not controller.side_buttons_pressed:
-                        # try to find an already connected joycon to combine with
                         if controller.is_joycon_left():
                             virtual_controller = next(filter(lambda vc: vc is not None and vc.is_single_joycon_right(), virtual_controllers), None)
                         elif controller.is_joycon_right():
                             virtual_controller = next(filter(lambda vc: vc is not None and vc.is_single_joycon_left(), virtual_controllers), None)
 
                     if virtual_controller is None:
-                        # Find an emtpy slot
                         slot_index = next(i for i, c in enumerate(virtual_controllers) if c == None)
-                        virtual_controller = VirtualController(slot_index+1)
+                        virtual_controller = VirtualController(slot_index + 1, disconnected_controller)
                         virtual_controllers[slot_index] = virtual_controller
                     
                     virtual_controller.add_controller(controller)
@@ -70,7 +71,7 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
 
                 logger.info(virtual_controllers)
                 if update_controllers_threadsafe is not None:
-                    update_controllers_threadsafe(virtual_controllers)
+                    update_controllers_threadsafe(list(virtual_controllers))
             except Exception:
                 logger.exception(f"Unable to initialize device {device.address}")
                 connected_mac_addresses.remove(device.address)
