@@ -238,7 +238,38 @@ class Config:
         
         self.gyro_bias = config.get("gyro_bias", [0.0, 0.0, 0.0])
         self.stick_r_bias = config.get("stick_r_bias", [0.0, 0.0])
+        
+        self.simulation_mode = config.get("simulation_mode", "Xbox")
 
         logger.info(f"Config successfully loaded from {self.config_file_path}")
+        
+    def save_config(self):
+        try:
+            with open(self.config_file_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+            
+            data['simulation_mode'] = self.simulation_mode
+            data['abxy_mode'] = self.abxy_mode
+            data['gl_mapping'] = self.gl_mapping
+            data['gr_mapping'] = self.gr_mapping
+            data['c_mapping'] = self.c_mapping
+            data['slr_mapping'] = self.slr_mapping
+            data['srl_mapping'] = self.srl_mapping
+            
+            data['gyro_mode'] = self.gyro_mode
+            data['gyro_sensitivity'] = self.gyro_sensitivity
+            data['gyro_activation_mode'] = self.gyro_activation_mode
+            data['stick_mouse_sensitivity'] = self.stick_mouse_sensitivity
+            
+            if 'mouse' not in data:
+                data['mouse'] = {}
+            data['mouse']['enabled'] = self.mouse_config.enabled
+            data['mouse']['sensitivity'] = self.mouse_config.sensitivity
+            
+            with open(self.config_file_path, 'w', encoding='utf-8') as f:
+                yaml.dump(data, f, default_flow_style=False)
+            logger.info("Config saved successfully.")
+        except Exception as e:
+            logger.error(f"Failed to save config: {e}")
     
 CONFIG = Config(get_resource("config.yaml"))
