@@ -65,6 +65,7 @@ class PlayerInfoBlock:
         self.parent = parent
         self.controller_label = None
         self.player_led_label = None
+        self.current_vc = None
 
         self.load_pictures()
         self.init_interface()
@@ -81,6 +82,11 @@ class PlayerInfoBlock:
         self.battery_frame = tk.Frame(self.main_frame, width=controller_frame_size, height=battery_height, bg=block_color, padx=50)
         self.battery_frame.pack()
         self.battery_frame.pack_propagate(False)
+
+    def _on_close_clicked(self):
+        if self.current_vc is not None:
+            self.close_btn.config(state=tk.DISABLED)
+            self.current_vc.trigger_disconnect()
 
     def load_pictures(self):
         self.joycon2leftandright = tk.PhotoImage(file=get_resource("images/joycon2leftandright.png"))
@@ -100,6 +106,10 @@ class PlayerInfoBlock:
         if self.player_led_label is not None:
             self.player_led_label.destroy()
             self.player_led_label = None
+            
+        if hasattr(self, 'close_btn') and self.close_btn is not None:
+            self.close_btn.destroy()
+            self.close_btn = None
 
     def get_image_for_battery_level(self, controller: Controller):
         if controller.battery_voltage is None:
@@ -112,6 +122,8 @@ class PlayerInfoBlock:
         return self.battery_l
 
     def displayControllersInfo(self, virtualController : VirtualController):
+        self.current_vc = virtualController
+
         if not virtualController.is_single():
             image = self.joycon2leftandright
         elif virtualController.is_single_joycon_right():
@@ -123,6 +135,11 @@ class PlayerInfoBlock:
 
         self.controller_label = tk.Label(self.controllers_frame, image=image, bg=block_color)
         self.controller_label.pack(fill="none", expand=True)
+
+        self.close_btn = tk.Button(self.controllers_frame, text="✖", bg=block_color, fg="#888888", bd=0, 
+                                   font=("Arial", 14, "bold"), activebackground="#ff4444", activeforeground="white", 
+                                   command=self._on_close_clicked)
+        self.close_btn.place(x=controller_frame_size-30, y=5, width=25, height=25)
 
         if virtualController.is_single():
             self.battery_label = tk.Label(self.battery_frame, image=self.get_image_for_battery_level(virtualController.controllers[0]), bg=block_color)
@@ -284,7 +301,6 @@ class ControllerWindow:
         self.settings_frame = tk.Frame(self.root, bg=background_color)
         self.settings_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
 
-        # 第一行：Layout 與 Mouse 設定
         row_global = tk.Frame(self.settings_frame, bg=background_color)
         row_global.pack(side=tk.TOP, fill=tk.X, pady=5)
         
@@ -301,7 +317,6 @@ class ControllerWindow:
         self.mouse_sens_scale.set(CONFIG.mouse_config.sensitivity)
         self.mouse_sens_scale.pack(side=tk.LEFT)
 
-        # 第二行：Pro Controller Buttons (GL, GR, C)
         row_pro = tk.Frame(self.settings_frame, bg=background_color)
         row_pro.pack(side=tk.TOP, fill=tk.X, pady=5)
         
@@ -314,29 +329,21 @@ class ControllerWindow:
             combo.bind("<<ComboboxSelected>>", self.on_setting_changed)
             setattr(self, f"{key}_combo", combo)
 
-        # 第三行：Joy-con Rail Buttons
         row_jc = tk.Frame(self.settings_frame, bg=background_color)
         row_jc.pack(side=tk.TOP, fill=tk.X, pady=5)
         
         tk.Label(row_jc, text="Joy-con Rail Buttons:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(10, 5))
         
-        # === 先排：左 Joy-con (SR_L) ===
-        # 左 Joy-con 剃除 "Gyro" 選項
         left_rail_options = [opt for opt in BACK_BUTTON_OPTIONS if opt != "Gyro"]
-        # 防呆：如果之前的設定檔存了 Gyro，強制洗白回 None
         if getattr(CONFIG, "srl_mapping", "None") == "Gyro":
             CONFIG.srl_mapping = "None"
 
-        # 注意：此處的 padx=(5, 2) 較小，為了緊靠標題
         tk.Label(row_jc, text="Left SR:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(5, 2))
         self.srl_combo = ttk.Combobox(row_jc, values=left_rail_options, font=("Arial", 12, "bold"), state="readonly", width=10)
         self.srl_combo.set(CONFIG.srl_mapping)
         self.srl_combo.pack(side=tk.LEFT, padx=2)
         self.srl_combo.bind("<<ComboboxSelected>>", self.on_setting_changed)
 
-        # === 後排：右 Joy-con (SL_R) ===
-        # 右 Joy-con 維持完整選項
-        # 注意：此處的 padx=(15, 2) 較大，為了與左邊選單拉開距離
         tk.Label(row_jc, text="Right SL:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(15, 2))
         self.slr_combo = ttk.Combobox(row_jc, values=BACK_BUTTON_OPTIONS, font=("Arial", 12, "bold"), state="readonly", width=10)
         self.slr_combo.set(CONFIG.slr_mapping)
@@ -394,20 +401,34 @@ class ControllerWindow:
                     player_info.displayControllersInfo(controller_info)
 
     def start(self):
+        self.is_quitting = False
+        
         def update_controllers_callback_threadsafe(controllers: list[VirtualController]):
-            self.message_queue.put(controllers)
-            self.root.event_generate(CONTROLLER_UPDATED_EVENT)
+            if getattr(self, 'is_quitting', False): 
+                return
+                
+            try:
+                self.message_queue.put(controllers)
+                self.root.event_generate(CONTROLLER_UPDATED_EVENT)
+            except Exception:
+                pass
         
         self.root.bind(CONTROLLER_UPDATED_EVENT, lambda e : self.update(self.message_queue.get()))
+        
         t = threading.Thread(target=start_discoverer, args=(update_controllers_callback_threadsafe, self.quit_event))
+        t.daemon = True
         t.start()
 
         def on_quit():
+            self.is_quitting = True
             self.quit_event.set()
+            self.root.quit()
             self.root.destroy()
+            
+            import os
+            os._exit(0)
 
         self.root.protocol("WM_DELETE_WINDOW", on_quit)
-
         self.root.mainloop()
 
 if __name__ == "__main__":
