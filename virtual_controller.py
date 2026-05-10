@@ -22,7 +22,7 @@ def get_ds4_dpad(up, down, left, right):
     return DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_NONE
 
 def float_to_byte(val):
-    return int(max(0, min(255, (val + 1.0) * 127.5)))
+    return int(max(0, min(255, round(val * 127.5 + 128))))
 
 
 
@@ -36,6 +36,8 @@ class VirtualController:
         self.next_vibration_event = None
         self.loop = None
         self.vg_controller = None
+        self.touch_tracking_id = 0
+        self.was_touching = False
         
         self.mode = getattr(CONFIG, "simulation_mode", "Xbox")
         self._setup_vg_controller()
@@ -102,6 +104,10 @@ class VirtualController:
         await self.update_leds()
         
         def input_report_callback(inputData: ControllerInputData, controller: Controller):
+            
+            if self.vg_controller is None:
+                return
+            
             current_buttons = inputData.buttons 
             if len(self.controllers) == 2:
                 buttonsConfig = CONFIG.dual_joycons_config
@@ -145,52 +151,112 @@ class VirtualController:
         report.wButtons = ds4_buttons | get_ds4_dpad(up, down, left, right)
 
         report.bSpecial = 0
-        if buttons & SWITCH_BUTTONS["HOME"]: report.bSpecial |= DS4_SPECIAL_BUTTONS.DS4_SPECIAL_BUTTON_PS
-        if buttons & SWITCH_BUTTONS["CAPT"]: report.bSpecial |= DS4_SPECIAL_BUTTONS.DS4_SPECIAL_BUTTON_TOUCHPAD
+        if buttons & SWITCH_BUTTONS.get("HOME", 0): 
+            report.bSpecial |= DS4_SPECIAL_BUTTONS.DS4_SPECIAL_BUTTON_PS
+
+        capt = bool(buttons & SWITCH_BUTTONS.get("CAPT", 0))
+        tpad_l = bool(buttons & SWITCH_BUTTONS.get("PSTPAD_L", 0))
+        tpad_r = bool(buttons & SWITCH_BUTTONS.get("PSTPAD_R", 0))
+
+        is_touching = capt or tpad_l or tpad_r
+
+        if is_touching:
+            report.bSpecial |= DS4_SPECIAL_BUTTONS.DS4_SPECIAL_BUTTON_TOUCHPAD
+            if not getattr(self, 'was_touching', False):
+                self.touch_tracking_id = (getattr(self, 'touch_tracking_id', 0) + 1) & 0x7F
+            report.sCurrentTouch.bIsUpTrackingNum1 = self.touch_tracking_id
+
+            if tpad_l:
+                report.sCurrentTouch.bTouchData1[0] = 0xE0
+                report.sCurrentTouch.bTouchData1[1] = 0x71
+                report.sCurrentTouch.bTouchData1[2] = 0x1D
+            elif tpad_r:
+                report.sCurrentTouch.bTouchData1[0] = 0xA0
+                report.sCurrentTouch.bTouchData1[1] = 0x75
+                report.sCurrentTouch.bTouchData1[2] = 0x1D
+            else:
+                report.sCurrentTouch.bTouchData1[0] = 0xC0
+                report.sCurrentTouch.bTouchData1[1] = 0x73
+                report.sCurrentTouch.bTouchData1[2] = 0x1D
+        else:
+            report.sCurrentTouch.bIsUpTrackingNum1 = 0x80 | getattr(self, 'touch_tracking_id', 0)
+
+        self.was_touching = is_touching
+        report.sCurrentTouch.bIsUpTrackingNum2 = 0x80
 
         report.bTriggerL = 255 if (buttons & SWITCH_BUTTONS["ZL"]) else 0
         report.bTriggerR = 255 if (buttons & SWITCH_BUTTONS["ZR"]) else 0
-        report.bBatteryLvl = 0x1F
-        report.bBatteryLvlSpecial = 0x05
-        
-        if controller.is_joycon_right() and len(self.controllers) == 1:
-            report.bThumbLX = float_to_byte(inputData.right_stick[1])
-            report.bThumbLY = float_to_byte(inputData.right_stick[0]) 
-        elif controller.is_joycon_left() and len(self.controllers) == 1:
-            report.bThumbLX = float_to_byte(-inputData.left_stick[1])
-            report.bThumbLY = float_to_byte(-inputData.left_stick[0]) 
-        else:
-            report.bThumbLX = float_to_byte(inputData.left_stick[0])
-            report.bThumbLY = float_to_byte(-inputData.left_stick[1])
-            report.bThumbRX = float_to_byte(inputData.right_stick[0])
-            report.bThumbRY = float_to_byte(-inputData.right_stick[1])
+        report.bBatteryLvl = 0xAF
+        report.bBatteryLvlSpecial = 0x08
 
-        self.ds4_timestamp = (self.ds4_timestamp + 188) & 0xFFFF
+        if not hasattr(self, 'last_lx'):
+            self.last_lx = 128; self.last_ly = 128
+            self.last_rx = 128; self.last_ry = 128
+            self.last_gx = 0; self.last_gy = 0; self.last_gz = 0
+            self.last_ax = 0; self.last_ay = 0; self.last_az = 0
+
+        if len(self.controllers) == 1:
+            if controller.is_joycon_right():
+                self.last_lx = float_to_byte(inputData.right_stick[1])
+                self.last_ly = float_to_byte(inputData.right_stick[0]) 
+            elif controller.is_joycon_left():
+                self.last_lx = float_to_byte(-inputData.left_stick[1])
+                self.last_ly = float_to_byte(-inputData.left_stick[0]) 
+            else:
+                self.last_lx = float_to_byte(inputData.left_stick[0])
+                self.last_ly = float_to_byte(-inputData.left_stick[1])
+                self.last_rx = float_to_byte(inputData.right_stick[0])
+                self.last_ry = float_to_byte(-inputData.right_stick[1])
+            
+            self.last_gx = inputData.gyroscope[0]
+            self.last_gy = inputData.gyroscope[2]
+            self.last_gz = -inputData.gyroscope[1]
+            self.last_ax = inputData.accelerometer[0]
+            self.last_ay = inputData.accelerometer[2]
+            self.last_az = -inputData.accelerometer[1]
+            
+        else:
+            if controller.is_joycon_left():
+                self.last_lx = float_to_byte(inputData.left_stick[0])
+                self.last_ly = float_to_byte(-inputData.left_stick[1])
+            elif controller.is_joycon_right():
+                self.last_rx = float_to_byte(inputData.right_stick[0])
+                self.last_ry = float_to_byte(-inputData.right_stick[1])
+                self.last_gx = inputData.gyroscope[0]
+                self.last_gy = inputData.gyroscope[2]
+                self.last_gz = -inputData.gyroscope[1]
+                self.last_ax = inputData.accelerometer[0]
+                self.last_ay = inputData.accelerometer[2]
+                self.last_az = -inputData.accelerometer[1]
+
+        report.bThumbLX = self.last_lx
+        report.bThumbLY = self.last_ly
+        report.bThumbRX = self.last_rx
+        report.bThumbRY = self.last_ry
+
+        def clamp_short(val): return max(-32768, min(32767, int(val)))
+        report.wGyroX = clamp_short(self.last_gx)
+        report.wGyroY = clamp_short(self.last_gy)
+        report.wGyroZ = clamp_short(self.last_gz)
+        report.wAccelX = clamp_short(self.last_ax)
+        report.wAccelY = clamp_short(self.last_ay)
+        report.wAccelZ = clamp_short(self.last_az)
+
+        self.ds4_timestamp = (getattr(self, 'ds4_timestamp', 0) + 188) & 0xFFFF
         report.wTimestamp = self.ds4_timestamp
         report.bTouchPacketsN = 1
         report.sCurrentTouch.bPacketCounter = (self.ds4_timestamp // 188) & 0xFF
-        report.sCurrentTouch.bIsUpTrackingNum1 = 0x80
-        report.sCurrentTouch.bIsUpTrackingNum2 = 0x80
-
-        def clamp_short(val): return max(-32768, min(32767, int(val)))
-        report.wGyroX = clamp_short(inputData.gyroscope[0])
-        report.wGyroY = clamp_short(inputData.gyroscope[2])
-        report.wGyroZ = clamp_short(-inputData.gyroscope[1])
-        report.wAccelX = clamp_short(inputData.accelerometer[0])
-        report.wAccelY = clamp_short(inputData.accelerometer[2])
-        report.wAccelZ = clamp_short(-inputData.accelerometer[1])
 
         try:
             import vgamepad.win.vigem_client as vcli
-            
             vcli.vigem_target_ds4_update_ex_ptr.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(DS4_REPORT_EX)]
-            
             busp = self.vg_controller.vbus.get_busp()
             devicep = self.vg_controller._devicep
             vcli.vigem_target_ds4_update_ex_ptr(busp, devicep, ctypes.byref(self.report_ex))
         except Exception as e:
             logger.error(f"Failed to send DS4 EX report: {e}")
-            self.vg_controller.update()
+            if self.vg_controller is not None:
+                self.vg_controller.update()
 
     def update_as_xbox(self, inputData: ControllerInputData, buttons: int, controller: Controller, buttonsConfig: ButtonConfig):
         xb_btns, lt, rt = buttonsConfig.convert_buttons(buttons)
