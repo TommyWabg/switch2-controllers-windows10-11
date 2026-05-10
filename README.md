@@ -5,12 +5,14 @@ This fork is heavily optimized for Windows 10/11 users, featuring a fully intera
 ## Key Features
 
 * **Windows 10 Native Compatibility:** Resolved the `AttributeError: property is not available...` crash. Runs flawlessly on Windows 10 (22H2 and above).
+* **Dynamic Emu Mode Toggle:** You can now instantly switch between Xbox 360 and PS4 (DualShock 4) emulation modes directly from the settings panel. This allows you to choose the best protocol for your specific game or platform without restarting the app.
+* **Native Motion Support (PS4 Mode):** Switching to PS4 mode enables native motion sensor reporting via the DS4 protocol. This provides enhanced compatibility for Steam Input and games that support native DualShock 4 gyro features.
 * **On-the-Fly Layout Switching:** No more multiple executables! Instantly toggle between **Nintendo Layout** (matching physical labels) and **Xbox Layout** (standard PC positioning) directly from the UI.
 * **Racing Wheel Mode (Steering):** Reads the controller's absolute tilt (accelerometer) and maps it directly to the Left Analog Stick's X-axis.
 * **High-Precision Gyro Mouse (FPS):** Play shooters with a high-polling rate, 1000Hz interpolation loop for ultra-smooth, jitter-free gyro aiming with both Switch 2 Right Joy-con and Pro Controller.
 * **Stick Assist:** Allowing the right thumbstick to work alongside gyro aiming.
 * **1-Click Gyro Calibration:** Built-in calibration tool to instantly calculate and permanently save sensor bias, eliminating gyro drift.
-* **Custom Extra Button Remapping:** Fully remap extra buttons like `GL`, `GR`, `SL_R`, `SR_L` and `Chat` to function as Gyro triggers or standard buttons.
+* **Custom Extra Button Remapping:** Fully remap extra buttons like `GL`, `GR`, `SL_R`, `SR_L` and `Chat` to function as Gyro triggers, PS4 trackpad click or standard buttons.
 * **Joy-con Mouse Toggle:** A new dedicated switch in the GUI to enable or disable the Joy-con mouse mode. This prevents accidental cursor movement during gameplay.
 * **Haptic & OS Integration:** Added rumble feedback (including a connection confirmation rumble) and mapped the Capture button to native Windows screenshots (`Win + PrtScn`).
 * **One-Click Disconnect:** Added a convenient 'X' button to the top right of each connected controller's UI block. You can now manually disconnect specific controllers directly from the interface without needing to power them off physically.
