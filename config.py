@@ -33,10 +33,12 @@ SWITCH_BUTTONS = {
     "ZL":    0x00800000,
     "GR":    0x01000000,
     "GL":    0x02000000,
+    "PSTPAD_L": 0x04000000,
+    "PSTPAD_R": 0x08000000,
 }
 
 BACK_BUTTON_OPTIONS = [
-    "None", "Gyro", "CAPT", "C", 
+    "None", "Gyro", "CAPT", "C", "PSTPAD_L", "PSTPAD_R", 
     "A", "B", "X", "Y", "L", "R", "ZL", "ZR", 
     "MINUS", "PLUS", "L_STK", "R_STK", "UP", "DOWN", "LEFT", "RIGHT"
 ]
