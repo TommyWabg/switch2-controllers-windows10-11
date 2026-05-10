@@ -446,6 +446,7 @@ class ControllerWindow:
         t.daemon = True
         t.start()
 
+
         def on_quit():
             if getattr(self, 'is_cleaning_up', False):
                 return
@@ -456,27 +457,33 @@ class ControllerWindow:
 
             def perform_cleanup():
                 try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                    import concurrent.futures
+                    futures = []
                     
-                    tasks = []
                     if hasattr(self, 'current_controllers'):
                         for vc in self.current_controllers:
-                            if vc is not None:
-                                tasks.append(vc.disconnect())
+                            if vc is not None and getattr(vc, 'loop', None) and vc.loop.is_running():
+                                fut = asyncio.run_coroutine_threadsafe(vc.disconnect(), vc.loop)
+                                futures.append(fut)
                     
-                    if tasks:
-                        loop.run_until_complete(asyncio.gather(*tasks))
+                    if futures:
+                        for fut in futures:
+                            try:
+                                fut.result(timeout=4.0) 
+                            except concurrent.futures.TimeoutError:
+                                logger.warning("藍牙底層無回應，已超時，強制切斷。")
+                            except Exception as e:
+                                logger.error(f"藍牙斷線時發生錯誤: {e}")
+                                
                         logger.info("所有實體連線已安全解除。")
-                    
-                    loop.close()
+                        
                 except Exception as e:
                     logger.error(f"清理時發生錯誤: {e}")
                 finally:
                     self.root.after(0, lambda: (self.root.destroy(), os._exit(0)))
 
             threading.Thread(target=perform_cleanup, daemon=True).start()
-
+            
         self.root.protocol("WM_DELETE_WINDOW", on_quit)
         self.root.mainloop()
 
