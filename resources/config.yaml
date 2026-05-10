@@ -75,8 +75,8 @@ c_mapping: None
 combine_joycons: true
 controller_mode: Xbox
 deadzone: 50
-gl_mapping: None
-gr_mapping: Gyro
+gl_mapping: PSTPAD_L
+gr_mapping: PSTPAD_R
 gyro_activation_mode: Hold
 gyro_bias:
 - 5.689655172413793
@@ -97,8 +97,9 @@ mouse:
   enabled: true
   scroll_sensitivity: 2
   sensitivity: 2.2
-slr_mapping: Gyro
-srl_mapping: None
+simulation_mode: PS4
+slr_mapping: PSTPAD_R
+srl_mapping: PSTPAD_L
 stick_mouse_sensitivity: 5.0
 stick_r_bias:
 - 0.0
