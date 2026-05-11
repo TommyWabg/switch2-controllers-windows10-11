@@ -338,17 +338,18 @@ class VirtualController:
             del self.vg_controller
             self.vg_controller = None
             
-        tasks = []
+        disconnect_tasks = []
         for c in list(self.controllers):
             if hasattr(c, 'client') and c.client and c.client.is_connected:
-                tasks.append(c.disconnect())
+                disconnect_tasks.append(asyncio.create_task(c.disconnect()))
+                
+        if disconnect_tasks:
+            await asyncio.gather(*disconnect_tasks)
             
+        for c in list(self.controllers):
             if self.on_disconnected_callback:
                 await self.on_disconnected_callback(c)
-        
-        if tasks:
-            await asyncio.gather(*tasks)
-            
+                
         self.controllers.clear()
 
     def trigger_disconnect(self):
@@ -373,5 +374,6 @@ class VirtualController:
                 
             return True 
         else:
-            await self.init_added_controller(self.controllers[0])
+            if getattr(self, 'running', True):
+                await self.init_added_controller(self.controllers[0])
             return False
