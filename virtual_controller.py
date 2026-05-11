@@ -41,6 +41,11 @@ class VirtualController:
         
         self.mode = getattr(CONFIG, "simulation_mode", "Xbox")
         self._setup_vg_controller()
+        
+        self.state_lock = threading.Lock()
+        self.running = True
+        self.update_thread = threading.Thread(target=self._1000hz_loop, daemon=True)
+        self.update_thread.start()
 
     def _setup_vg_controller(self):
         if self.vg_controller is not None:
@@ -128,6 +133,10 @@ class VirtualController:
         controller.set_input_report_callback(input_report_callback)
 
     def update_as_ps4(self, inputData: ControllerInputData, buttons: int, controller: Controller):
+        with self.state_lock:
+            self._update_as_ps4_locked(inputData, buttons, controller)
+
+    def _update_as_ps4_locked(self, inputData: ControllerInputData, buttons: int, controller: Controller):
         report = self.report_ex.Report
         
         ds4_buttons = 0
@@ -242,36 +251,20 @@ class VirtualController:
         report.wAccelY = clamp_short(self.last_ay)
         report.wAccelZ = clamp_short(self.last_az)
 
-        self.ds4_timestamp = (getattr(self, 'ds4_timestamp', 0) + 188) & 0xFFFF
-        report.wTimestamp = self.ds4_timestamp
-        report.bTouchPacketsN = 1
-        report.sCurrentTouch.bPacketCounter = (self.ds4_timestamp // 188) & 0xFF
-
-        try:
-            import vgamepad.win.vigem_client as vcli
-            vcli.vigem_target_ds4_update_ex_ptr.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(DS4_REPORT_EX)]
-            busp = self.vg_controller.vbus.get_busp()
-            devicep = self.vg_controller._devicep
-            vcli.vigem_target_ds4_update_ex_ptr(busp, devicep, ctypes.byref(self.report_ex))
-        except Exception as e:
-            logger.error(f"Failed to send DS4 EX report: {e}")
-            if self.vg_controller is not None:
-                self.vg_controller.update()
-
     def update_as_xbox(self, inputData: ControllerInputData, buttons: int, controller: Controller, buttonsConfig: ButtonConfig):
-        xb_btns, lt, rt = buttonsConfig.convert_buttons(buttons)
-        self.vg_controller.report.wButtons = xb_btns
-        self.vg_controller.left_trigger(255 if lt else 0)
-        self.vg_controller.right_trigger(255 if rt else 0)
-
-        if controller.is_joycon_right() and len(self.controllers) == 1:
-            self.vg_controller.left_joystick_float(inputData.right_stick[1], -inputData.right_stick[0])
-        elif controller.is_joycon_left() and len(self.controllers) == 1:
-            self.vg_controller.left_joystick_float(-inputData.left_stick[1], inputData.left_stick[0])
-        else:
-            if not controller.is_joycon_left(): self.vg_controller.right_joystick_float(inputData.right_stick[0], inputData.right_stick[1])
-            if not controller.is_joycon_right(): self.vg_controller.left_joystick_float(inputData.left_stick[0], inputData.left_stick[1])
-        self.vg_controller.update()
+        with self.state_lock:
+            xb_btns, lt, rt = buttonsConfig.convert_buttons(buttons)
+            self.vg_controller.report.wButtons = xb_btns
+            self.vg_controller.left_trigger(255 if lt else 0)
+            self.vg_controller.right_trigger(255 if rt else 0)
+    
+            if controller.is_joycon_right() and len(self.controllers) == 1:
+                self.vg_controller.left_joystick_float(inputData.right_stick[1], -inputData.right_stick[0])
+            elif controller.is_joycon_left() and len(self.controllers) == 1:
+                self.vg_controller.left_joystick_float(-inputData.left_stick[1], inputData.left_stick[0])
+            else:
+                if not controller.is_joycon_left(): self.vg_controller.right_joystick_float(inputData.right_stick[0], inputData.right_stick[1])
+                if not controller.is_joycon_right(): self.vg_controller.left_joystick_float(inputData.left_stick[0], inputData.left_stick[1])
 
     def is_single(self): 
         return len(self.controllers) == 1
@@ -292,8 +285,46 @@ class VirtualController:
         for c in self.controllers:
             if hasattr(c, 'start_calibration'):
                 c.start_calibration()
+
+    def _1000hz_loop(self):
+        import time
+        last_time = time.perf_counter()
+        while self.running:
+            now = time.perf_counter()
+            dt = now - last_time
+            if dt < 0.001:
+                time.sleep(0)
+                continue
+                
+            last_time = now
+            if dt > 0.05: dt = 0.015
+            
+            with self.state_lock:
+                if self.vg_controller is None:
+                    continue
+                    
+                if self.mode == "PS4":
+                    ticks = int(dt * 187500)
+                    self.ds4_timestamp = (getattr(self, 'ds4_timestamp', 0) + ticks) & 0xFFFF
+                    
+                    self.report_ex.Report.wTimestamp = self.ds4_timestamp
+                    self.report_ex.Report.bTouchPacketsN = 1
+                    self.touch_packet_counter = (getattr(self, 'touch_packet_counter', 0) + 1) & 0xFF
+                    self.report_ex.Report.sCurrentTouch.bPacketCounter = self.touch_packet_counter
+            
+                    try:
+                        import vgamepad.win.vigem_client as vcli
+                        vcli.vigem_target_ds4_update_ex_ptr.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(DS4_REPORT_EX)]
+                        busp = self.vg_controller.vbus.get_busp()
+                        devicep = self.vg_controller._devicep
+                        vcli.vigem_target_ds4_update_ex_ptr(busp, devicep, ctypes.byref(self.report_ex))
+                    except Exception as e:
+                        self.vg_controller.update()
+                else:
+                    self.vg_controller.update()
                 
     async def disconnect(self):
+        self.running = False
         if not self.controllers:
             return
 
