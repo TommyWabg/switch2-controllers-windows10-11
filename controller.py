@@ -509,8 +509,8 @@ class Controller:
                     dy = signed_looping_difference_16bit(self.previous_mouse_state.y ,y)
 
                     if dx != 0 or dy != 0:
-                        self.jc_target_vx = dx * mouse_config.sensitivity * 0.003
-                        self.jc_target_vy = dy * mouse_config.sensitivity * 0.003
+                        self.jc_target_vx = dx * mouse_config.sensitivity * 0.009
+                        self.jc_target_vy = dy * mouse_config.sensitivity * 0.009
                     else:
                         self.jc_target_vx = 0.0
                         self.jc_target_vy = 0.0
