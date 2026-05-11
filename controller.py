@@ -9,6 +9,7 @@ import win32con
 from dataclasses import dataclass
 import ctypes
 import time
+import threading
 try:
     ctypes.windll.winmm.timeBeginPeriod(1)
 except Exception:
@@ -238,6 +239,10 @@ class Controller:
         self.calibration_end_time = time.perf_counter() + 2.0
         self.calibration_samples_gyro = []
         self.calibration_samples_stick = []
+        
+        self.interp_running = False
+        self.interp_thread = None
+        
         logger.info(f"Calibration started for {self.device.address}. Please keep the controller stationary...")
     
     async def connect(self):
@@ -253,6 +258,28 @@ class Controller:
         
         logger.info(f"Connected to {self.device.address}")
         
+        import sys
+        if sys.platform == "win32":
+            try:
+                try:
+                    import winrt.windows.devices.bluetooth as wd_bluetooth
+                except ImportError:
+                    import bleak_winrt.windows.devices.bluetooth as wd_bluetooth
+                    
+                if hasattr(wd_bluetooth, 'BluetoothLEPreferredConnectionParameters'):
+                    params = wd_bluetooth.BluetoothLEPreferredConnectionParameters.throughput_optimized
+                    device = getattr(self.client._backend, "_requester", None)
+                    if device:
+                        if hasattr(device, 'request_preferred_connection_parameters_async'):
+                            await device.request_preferred_connection_parameters_async(params)
+                        elif hasattr(device, 'request_preferred_connection_parameters'):
+                            device.request_preferred_connection_parameters(params)
+                        logger.info(f"ThroughputOptimized applied for {self.device.address}")
+                else:
+                    logger.info("ThroughputOptimized not available on this Windows version.")
+            except Exception as e:
+                logger.warning(f"Failed to apply ThroughputOptimized: {e}")
+
         await asyncio.sleep(1.0)
         
         self.response_future = None
@@ -266,10 +293,11 @@ class Controller:
 
         await self.enable_input_notify_callback()
         
-        if self.interp_task is None:
-            self.interp_task = asyncio.create_task(self.gyro_interpolation_loop())
-        
         await self.enableFeatures(FEATURE_MOTION | FEATURE_MOUSE)
+
+        self.interp_running = True
+        self.interp_thread = threading.Thread(target=self._interpolation_thread_loop, daemon=True)
+        self.interp_thread.start()
 
         logger.info(f"Successfully initialized {self.device.address} : {self.controller_info}")
         try:
@@ -303,6 +331,7 @@ class Controller:
         return await cls.create_from_device(device)
         
     async def disconnect(self):
+        self.interp_running = False
         if self.client:
             if self.client.is_connected:
                 logger.info(f"正在與 {self.device.address} 斷開藍牙連結...")
@@ -642,18 +671,17 @@ class Controller:
         else:
             self.gyro_target_vx = 0.0
             self.gyro_target_vy = 0.0
-            if self.prev_zr: win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            if self.prev_zl: win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+            if getattr(self, 'prev_zr', False): win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            if getattr(self, 'prev_zl', False): win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
             self.prev_zr = self.prev_zl = False
+            self.gyro_residual_x = self.gyro_residual_y = 0.0
             self.current_vx = self.current_vy = 0.0
             self.interp_residual_x = self.interp_residual_y = 0.0
-            
-    async def gyro_interpolation_loop(self):
-        last_time = time.perf_counter()
 
-        while True:
+    def _interpolation_thread_loop(self):
+        last_time = time.perf_counter()
+        while self.interp_running:
             if self.client and self.client.is_connected and (self.gyro_mouse_enabled or getattr(self, 'jc_mouse_active', False)):
-                
                 self.current_vx = self.gyro_target_vx + getattr(self, 'jc_target_vx', 0.0)
                 self.current_vy = self.gyro_target_vy + getattr(self, 'jc_target_vy', 0.0)
 
@@ -681,7 +709,7 @@ class Controller:
             else:
                 last_time = time.perf_counter()
 
-            await asyncio.sleep(0.001)  
+            time.sleep(0.001)
 
     ### Info Helpers ###
 
