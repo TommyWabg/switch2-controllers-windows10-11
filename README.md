@@ -33,7 +33,7 @@ Because this app emulates both Xbox360 and PS4 controllers, Steam Input might tr
 **To ensure your layout stays consistent:**
 1. Go to **Steam** > **Settings** > **Controller** > **Show Advanced Settings**.
 2. Make sure "**Enable Steam Input for Xbox controllers**" is turned **ON**.
-3. Make sure "PlayStation Controller Support" is set to Enabled.
+3. Make sure "PlayStation Controller Support" is set to **Enabled**. (**NOT** Enabled in Games w/o Supports)
 4. Now theSwitch_2_Controllers app will handle the layout switching for you!
 
 ## Gyro Calibration Guide
