@@ -5,11 +5,13 @@ This fork is heavily optimized for Windows 10/11 users, featuring a fully intera
 ## Key Features
 
 * **Windows 10 Native Compatibility:** Resolved the `AttributeError: property is not available...` crash. Runs flawlessly on Windows 10 (22H2 and above).
+* **Low Latency Bluetooth Mode:** The application now forces Windows Bluetooth LE into `ThroughputOptimized` mode upon connection. This drastically drops the connection interval, massively reducing native Bluetooth input delay across the board.
 * **Dynamic Emu Mode Toggle:** You can now instantly switch between Xbox 360 and PS4 (DualShock 4) emulation modes directly from the settings panel. This allows you to choose the best protocol for your specific game or platform without restarting the app.
 * **Native Motion Support (PS4 Mode):** Switching to PS4 mode enables native motion sensor reporting via the DS4 protocol. This provides enhanced compatibility for Steam Input and games that support native DualShock 4 gyro features.
 * **On-the-Fly Layout Switching:** No more multiple executables! Instantly toggle between **Nintendo Layout** (matching physical labels) and **Xbox Layout** (standard PC positioning) directly from the UI.
-* **Racing Wheel Mode (Steering):** Reads the controller's absolute tilt (accelerometer) and maps it directly to the Left Analog Stick's X-axis.
-* **High-Precision Gyro Mouse (FPS):** Play shooters with a high-polling rate, 1000Hz interpolation loop for ultra-smooth, jitter-free gyro aiming with both Switch 2 Right Joy-con and Pro Controller.
+* **1000Hz Interpolation:** 1000Hz interpolation loop for ultra-smooth, jitter-free gyro motion rendering with both Switch 2 Right Joy-con and Pro Controller. **Gyro Mouse**, **Joy-con Mouse**, and **Steam Gyro** now output smoother and lag-free movement at 1000Hz.
+* **Gyro Racing Wheel Mode (Steering):** Reads the controller's absolute tilt (accelerometer) and maps it directly to the Left Analog Stick's X-axis.
+* **High-Precision Gyro Mouse (FPS):** Play shooters or navigate through UI with high-polling rate gyro mouse control. RT and LT act as left and right mouse click when gyro mouse is activated.
 * **Stick Assist:** Allowing the right thumbstick to work alongside gyro aiming.
 * **1-Click Gyro Calibration:** Built-in calibration tool to instantly calculate and permanently save sensor bias, eliminating gyro drift.
 * **Custom Extra Button Remapping:** Fully remap extra buttons like `GL`, `GR`, `SL_R`, `SR_L` and `Chat` to function as Gyro triggers, PS4 trackpad click or standard buttons.
@@ -27,7 +29,7 @@ This fork is heavily optimized for Windows 10/11 users, featuring a fully intera
 5. Use the app's settings panel at the bottom to configure your preferred layout, gyro sensitivity, and custom mappings.
 
 ## Important Setting for Steam Users:
-Because this app emulates an Xbox 360 controller, Steam Input might try to "help" by applying its own layout overrides, which can double-swap your buttons and mess up your in-game controls! 
+Because this app emulates both Xbox360 and PS4 controllers, Steam Input might try to "help" by applying its own layout overrides, which can double-swap your buttons and mess up your in-game controls! 
 **To ensure your layout stays consistent:**
 1. Go to **Steam** > **Settings** > **Controller** > **Show Advanced Settings**.
 2. Make sure "**Enable Steam Input for Xbox controllers**" is turned **ON**.
