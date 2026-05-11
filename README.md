@@ -23,7 +23,7 @@ This fork is heavily optimized for Windows 10/11 users, featuring a fully intera
 ## Quick Start
 
 1. Download and install the [Nefarius ViGEmBus driver](https://github.com/nefarius/ViGEmBus/releases).
-2. Download the `.exe` from the **[Releases]** page.
+2. Download the `.exe` from the **[Releases](https://github.com/TommyWabg/switch2-controllers-windows10-gyro/releases)** page.
 3. Launch the app **before** connecting your controller. 
 4. Hold the Sync button on your controller, or press any button if it's already paired. **Do not** pair controllers manually in Windows Bluetooth settings; the app uses automatic GATT discovery.
 5. Use the app's settings panel at the bottom to configure your preferred layout, gyro sensitivity, and custom mappings.
