@@ -83,7 +83,7 @@ gyro_bias:
 - -13.310344827586206
 - -0.4482758620689655
 gyro_mode: Yaw
-gyro_sensitivity: 3.0
+gyro_sensitivity: 4.0
 mouse:
   buttons:
     left_joycon:
@@ -96,7 +96,7 @@ mouse:
       right_button: ZR
   enabled: true
   scroll_sensitivity: 2
-  sensitivity: 2.2
+  sensitivity: 5.0
 simulation_mode: PS4
 slr_mapping: PSTPAD_R
 srl_mapping: PSTPAD_L
