@@ -171,7 +171,7 @@ class ControllerWindow:
         self.root.title("Switch2 Controllers")
         
         self.root.geometry("1000x580+50+50") 
-        self.root.minsize(1000, 640)
+        self.root.minsize(1000, 690)
         self.root.config(bg=background_color, padx=10, pady=10)
         self.font = tkFont.Font(family="Arial", size=16, weight="bold")
         self.pairing_hint_image = tk.PhotoImage(file=get_resource("images/pairing_hint.png"))
@@ -314,12 +314,15 @@ class ControllerWindow:
         self.layout_switch = ToggleSwitch(row_global, ["Xbox", "Switch"], ["Xbox", "Switch"], CONFIG.abxy_mode, self.update_layout_setting, background_color)
         self.layout_switch.pack(side=tk.LEFT, padx=5)
 
-        tk.Label(row_global, text="Joy-con Mouse:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(20, 2))
-        self.mouse_switch = ToggleSwitch(row_global, ["ON", "OFF"], [True, False], CONFIG.mouse_config.enabled, self.update_mouse_setting, background_color)
+        row_mouse = tk.Frame(self.settings_frame, bg=background_color)
+        row_mouse.pack(side=tk.TOP, fill=tk.X, pady=5)
+
+        tk.Label(row_mouse, text="Joy-con Mouse:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(10, 2))
+        self.mouse_switch = ToggleSwitch(row_mouse, ["ON", "OFF"], [True, False], CONFIG.mouse_config.enabled, self.update_mouse_setting, background_color)
         self.mouse_switch.pack(side=tk.LEFT, padx=5)
         
-        tk.Label(row_global, text="Sensitivity:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(10, 2))
-        self.mouse_sens_scale = tk.Scale(row_global, from_=1, to=10, resolution=0.2, orient=tk.HORIZONTAL, length=120, bg=background_color, font=("Arial", 12, "bold"), command=self.update_mouse_sensitivity)
+        tk.Label(row_mouse, text="Sensitivity:", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(10, 2))
+        self.mouse_sens_scale = tk.Scale(row_mouse, from_=1, to=10, resolution=0.2, orient=tk.HORIZONTAL, length=120, bg=background_color, font=("Arial", 12, "bold"), command=self.update_mouse_sensitivity)
         self.mouse_sens_scale.set(CONFIG.mouse_config.sensitivity)
         self.mouse_sens_scale.pack(side=tk.LEFT)
 
