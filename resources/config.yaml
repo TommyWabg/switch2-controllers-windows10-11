@@ -72,6 +72,19 @@ buttons:
     Y: Y
     ZR: RT
 c_mapping: None
+calibration_data:
+  E0:EF:BF:81:06:9F:
+  - 5.9
+  - -13.466666666666667
+  - -0.18333333333333332
+  E0:EF:BF:EF:CC:BD:
+  - 2.0551181102362204
+  - -10.795275590551181
+  - 10.118110236220472
+  E0:EF:BF:F0:0E:17:
+  - -2.072
+  - -0.488
+  - 4.264
 combine_joycons: true
 controller_mode: Xbox
 deadzone: 50
@@ -82,6 +95,14 @@ gyro_bias:
 - 5.689655172413793
 - -13.310344827586206
 - -0.4482758620689655
+gyro_bias_l:
+- -2.072
+- -0.488
+- 4.264
+gyro_bias_r:
+- 5.9
+- -13.466666666666667
+- -0.18333333333333332
 gyro_mode: Yaw
 gyro_sensitivity: 4.0
 mouse:

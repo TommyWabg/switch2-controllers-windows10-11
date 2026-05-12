@@ -238,8 +238,12 @@ class Config:
         self.gyro_activation_mode = config.get("gyro_activation_mode", "Toggle")
         self.stick_mouse_sensitivity = float(config.get("stick_mouse_sensitivity", 20.0))
         
-        self.gyro_bias = config.get("gyro_bias", [0.0, 0.0, 0.0])
+        self.gyro_bias_l = config.get("gyro_bias_l", [0.0, 0.0, 0.0])
+        self.gyro_bias_r = config.get("gyro_bias_r", [0.0, 0.0, 0.0])
         self.stick_r_bias = config.get("stick_r_bias", [0.0, 0.0])
+        
+        # MAC address -> Calibration data mapping dictionary
+        self.calibration_data = config.get("calibration_data", {})
         
         self.simulation_mode = config.get("simulation_mode", "Xbox")
 
@@ -262,6 +266,11 @@ class Config:
             data['gyro_sensitivity'] = self.gyro_sensitivity
             data['gyro_activation_mode'] = self.gyro_activation_mode
             data['stick_mouse_sensitivity'] = self.stick_mouse_sensitivity
+            
+            data['gyro_bias_l'] = self.gyro_bias_l
+            data['gyro_bias_r'] = self.gyro_bias_r
+            data['stick_r_bias'] = self.stick_r_bias
+            data['calibration_data'] = self.calibration_data
             
             if 'mouse' not in data:
                 data['mouse'] = {}

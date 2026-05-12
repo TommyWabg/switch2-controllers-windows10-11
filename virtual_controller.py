@@ -39,6 +39,9 @@ class VirtualController:
         self.touch_tracking_id = 0
         self.was_touching = False
         
+        self.hold_mode = "Horizontal"
+        self.active_gyro_side = "Right"
+        
         self.mode = getattr(CONFIG, "simulation_mode", "Xbox")
         self._setup_vg_controller()
         
@@ -66,10 +69,10 @@ class VirtualController:
             self.report_ex.Report.bBatteryLvl = 0xAF
             self.report_ex.Report.bBatteryLvlSpecial = 0x08
             self.ds4_timestamp = 0
-            logger.info("已切換為虛擬 PS4 控制器")
+            logger.info("Switched to virtual PS4 controller")
         else:
             self.vg_controller = vgamepad.VX360Gamepad()
-            logger.info("已切換為虛擬 Xbox 360 控制器")
+            logger.info("Switched to virtual Xbox 360 controller")
 
         self.vg_controller.register_notification(callback_function=self.vibration_callback)
 
@@ -108,12 +111,114 @@ class VirtualController:
         self.loop = asyncio.get_running_loop()
         await self.update_leds()
         
+        # Reset Gyro Mouse state to prevent leftover state after Split/Merge
+        controller.gyro_mouse_enabled = False
+        controller.gr_was_pressed = False
+        controller._own_gyro_trigger = False
+        controller._shared_gyro_trigger = False
+        controller.gyro_target_vx = 0.0
+        controller.gyro_target_vy = 0.0
+        controller.current_vx = 0.0
+        controller.current_vy = 0.0
+        controller.interp_residual_x = 0.0
+        controller.interp_residual_y = 0.0
+        controller.prev_zr = False
+        controller.prev_zl = False
+        
         def input_report_callback(inputData: ControllerInputData, controller: Controller):
             
             if self.vg_controller is None:
                 return
             
+            if len(self.controllers) == 2 or controller.is_pro_controller():
+                controller.gyro_active = (controller.is_joycon_left() and self.active_gyro_side == "Left") or (controller.is_joycon_right() and self.active_gyro_side == "Right") or controller.is_pro_controller()
+                controller.hold_mode = "Vertical"
+            else:
+                controller.gyro_active = True
+                controller.hold_mode = getattr(self, "hold_mode", "Horizontal")
+            
+            # In combined mode, share gyro trigger from any side to all controllers
+            # Allows the gyro-active controller to receive the trigger signal
+            if len(self.controllers) == 2:
+                shared = any(getattr(c, '_own_gyro_trigger', False) for c in self.controllers)
+                for c in self.controllers:
+                    c._shared_gyro_trigger = shared
+                
             current_buttons = inputData.buttons 
+            
+            if len(self.controllers) == 1:
+                if controller.is_joycon_left():
+                    if self.hold_mode == "Vertical":
+                        inputData.right_stick = inputData.left_stick
+                        inputData.left_stick = (0, 0)
+                        
+                        new_btns = current_buttons & ~(SWITCH_BUTTONS["UP"] | SWITCH_BUTTONS["DOWN"] | SWITCH_BUTTONS["LEFT"] | SWITCH_BUTTONS["RIGHT"] | SWITCH_BUTTONS["L"] | SWITCH_BUTTONS["ZL"] | SWITCH_BUTTONS["L_STK"] | SWITCH_BUTTONS["MINUS"])
+                        
+                        if current_buttons & SWITCH_BUTTONS["L_STK"]:
+                            new_btns |= SWITCH_BUTTONS["R_STK"]
+                            
+                        if CONFIG.abxy_mode == "Switch":
+                            if current_buttons & SWITCH_BUTTONS["UP"]: new_btns |= SWITCH_BUTTONS["Y"]
+                            if current_buttons & SWITCH_BUTTONS["DOWN"]: new_btns |= SWITCH_BUTTONS["A"]
+                            if current_buttons & SWITCH_BUTTONS["LEFT"]: new_btns |= SWITCH_BUTTONS["X"]
+                            if current_buttons & SWITCH_BUTTONS["RIGHT"]: new_btns |= SWITCH_BUTTONS["B"]
+                        else:
+                            if current_buttons & SWITCH_BUTTONS["UP"]: new_btns |= SWITCH_BUTTONS["X"]
+                            if current_buttons & SWITCH_BUTTONS["DOWN"]: new_btns |= SWITCH_BUTTONS["B"]
+                            if current_buttons & SWITCH_BUTTONS["LEFT"]: new_btns |= SWITCH_BUTTONS["Y"]
+                            if current_buttons & SWITCH_BUTTONS["RIGHT"]: new_btns |= SWITCH_BUTTONS["A"]
+                            
+                        if current_buttons & SWITCH_BUTTONS["L"]: new_btns |= SWITCH_BUTTONS["R"]
+                        if current_buttons & SWITCH_BUTTONS["ZL"]: new_btns |= SWITCH_BUTTONS["ZR"]
+                        if current_buttons & SWITCH_BUTTONS["MINUS"]: new_btns |= SWITCH_BUTTONS["PLUS"]
+                        current_buttons = new_btns
+                        
+                    elif self.hold_mode == "Horizontal":
+                        lx, ly = inputData.left_stick
+                        inputData.left_stick = (-ly, lx)
+                        inputData.right_stick = (0, 0)
+                        
+                        new_btns = current_buttons & ~(SWITCH_BUTTONS["UP"] | SWITCH_BUTTONS["DOWN"] | SWITCH_BUTTONS["LEFT"] | SWITCH_BUTTONS["RIGHT"] | SWITCH_BUTTONS["SL_L"] | SWITCH_BUTTONS["SR_L"] | SWITCH_BUTTONS["L"] | SWITCH_BUTTONS["ZL"] | SWITCH_BUTTONS["MINUS"])
+                        
+                        if CONFIG.abxy_mode == "Switch":
+                            if current_buttons & SWITCH_BUTTONS["UP"]: new_btns |= SWITCH_BUTTONS["X"]
+                            if current_buttons & SWITCH_BUTTONS["DOWN"]: new_btns |= SWITCH_BUTTONS["B"]
+                            if current_buttons & SWITCH_BUTTONS["LEFT"]: new_btns |= SWITCH_BUTTONS["A"]
+                            if current_buttons & SWITCH_BUTTONS["RIGHT"]: new_btns |= SWITCH_BUTTONS["Y"]
+                        else:
+                            if current_buttons & SWITCH_BUTTONS["UP"]: new_btns |= SWITCH_BUTTONS["Y"]
+                            if current_buttons & SWITCH_BUTTONS["DOWN"]: new_btns |= SWITCH_BUTTONS["A"]
+                            if current_buttons & SWITCH_BUTTONS["LEFT"]: new_btns |= SWITCH_BUTTONS["B"]
+                            if current_buttons & SWITCH_BUTTONS["RIGHT"]: new_btns |= SWITCH_BUTTONS["X"]
+                            
+                        if current_buttons & SWITCH_BUTTONS["SL_L"]: new_btns |= SWITCH_BUTTONS["ZL"]
+                        if current_buttons & SWITCH_BUTTONS["SR_L"]: new_btns |= SWITCH_BUTTONS["ZR"]
+                        if current_buttons & SWITCH_BUTTONS["MINUS"]: new_btns |= SWITCH_BUTTONS["PLUS"]
+                        current_buttons = new_btns
+                elif controller.is_joycon_right():
+                    if self.hold_mode == "Vertical":
+                        pass 
+                    elif self.hold_mode == "Horizontal":
+                        rx, ry = inputData.right_stick
+                        inputData.right_stick = (ry, -rx)
+                        new_btns = current_buttons & ~(SWITCH_BUTTONS["X"] | SWITCH_BUTTONS["Y"] | SWITCH_BUTTONS["A"] | SWITCH_BUTTONS["B"] | SWITCH_BUTTONS["SL_R"] | SWITCH_BUTTONS["SR_R"] | SWITCH_BUTTONS["R"] | SWITCH_BUTTONS["ZR"] | SWITCH_BUTTONS["PLUS"])
+                        
+                        if CONFIG.abxy_mode == "Switch":
+                            if current_buttons & SWITCH_BUTTONS["A"]: new_btns |= SWITCH_BUTTONS["X"]
+                            if current_buttons & SWITCH_BUTTONS["X"]: new_btns |= SWITCH_BUTTONS["Y"]
+                            if current_buttons & SWITCH_BUTTONS["B"]: new_btns |= SWITCH_BUTTONS["A"]
+                            if current_buttons & SWITCH_BUTTONS["Y"]: new_btns |= SWITCH_BUTTONS["B"]
+                        else:
+                            if current_buttons & SWITCH_BUTTONS["A"]: new_btns |= SWITCH_BUTTONS["B"]
+                            if current_buttons & SWITCH_BUTTONS["X"]: new_btns |= SWITCH_BUTTONS["A"]
+                            if current_buttons & SWITCH_BUTTONS["B"]: new_btns |= SWITCH_BUTTONS["Y"]
+                            if current_buttons & SWITCH_BUTTONS["Y"]: new_btns |= SWITCH_BUTTONS["X"]
+
+                        if current_buttons & SWITCH_BUTTONS["SL_R"]: new_btns |= SWITCH_BUTTONS["R"]
+                        if current_buttons & SWITCH_BUTTONS["SR_R"]: new_btns |= SWITCH_BUTTONS["ZR"]
+                        if current_buttons & SWITCH_BUTTONS["PLUS"]: new_btns |= SWITCH_BUTTONS["PLUS"]
+                        current_buttons = new_btns
+                    
             if len(self.controllers) == 2:
                 buttonsConfig = CONFIG.dual_joycons_config
                 if controller.is_joycon_left(): self.previous_buttons_left = current_buttons
@@ -205,24 +310,33 @@ class VirtualController:
             self.last_ax = 0; self.last_ay = 0; self.last_az = 0
 
         if len(self.controllers) == 1:
-            if controller.is_joycon_right():
-                self.last_lx = float_to_byte(inputData.right_stick[1])
-                self.last_ly = float_to_byte(inputData.right_stick[0]) 
-            elif controller.is_joycon_left():
-                self.last_lx = float_to_byte(-inputData.left_stick[1])
-                self.last_ly = float_to_byte(-inputData.left_stick[0]) 
-            else:
-                self.last_lx = float_to_byte(inputData.left_stick[0])
-                self.last_ly = float_to_byte(-inputData.left_stick[1])
-                self.last_rx = float_to_byte(inputData.right_stick[0])
-                self.last_ry = float_to_byte(-inputData.right_stick[1])
+            self.last_lx = float_to_byte(inputData.left_stick[0])
+            self.last_ly = float_to_byte(-inputData.left_stick[1])
+            self.last_rx = float_to_byte(inputData.right_stick[0])
+            self.last_ry = float_to_byte(-inputData.right_stick[1])
             
-            self.last_gx = inputData.gyroscope[0]
-            self.last_gy = inputData.gyroscope[2]
-            self.last_gz = -inputData.gyroscope[1]
-            self.last_ax = inputData.accelerometer[0]
-            self.last_ay = inputData.accelerometer[2]
-            self.last_az = -inputData.accelerometer[1]
+            if self.hold_mode == "Horizontal" and not controller.is_pro_controller():
+                if controller.is_joycon_right():
+                    self.last_gx = inputData.gyroscope[1]
+                    self.last_gy = inputData.gyroscope[2]
+                    self.last_gz = -inputData.gyroscope[0]
+                    self.last_ax = inputData.accelerometer[1]
+                    self.last_ay = inputData.accelerometer[2]
+                    self.last_az = inputData.accelerometer[0]
+                else:
+                    self.last_gx = -inputData.gyroscope[1]
+                    self.last_gy = inputData.gyroscope[2]
+                    self.last_gz = inputData.gyroscope[0]
+                    self.last_ax = -inputData.accelerometer[1]
+                    self.last_ay = inputData.accelerometer[2]
+                    self.last_az = -inputData.accelerometer[0]
+            else:
+                self.last_gx = inputData.gyroscope[0]
+                self.last_gy = inputData.gyroscope[2]
+                self.last_gz = -inputData.gyroscope[1]
+                self.last_ax = inputData.accelerometer[0]
+                self.last_ay = inputData.accelerometer[2]
+                self.last_az = -inputData.accelerometer[1]
             
         else:
             if controller.is_joycon_left():
@@ -231,6 +345,8 @@ class VirtualController:
             elif controller.is_joycon_right():
                 self.last_rx = float_to_byte(inputData.right_stick[0])
                 self.last_ry = float_to_byte(-inputData.right_stick[1])
+                
+            if getattr(controller, 'gyro_active', False):
                 self.last_gx = inputData.gyroscope[0]
                 self.last_gy = inputData.gyroscope[2]
                 self.last_gz = -inputData.gyroscope[1]
@@ -328,7 +444,7 @@ class VirtualController:
         if not self.controllers:
             return
 
-        logger.info(f"玩家 {self.player_number}: 正在關閉虛擬裝置並中斷藍牙連線...")
+        logger.info(f"Player {self.player_number}: Closing virtual device and disconnecting Bluetooth...")
 
         if hasattr(self, 'vg_controller') and self.vg_controller is not None:
             try:

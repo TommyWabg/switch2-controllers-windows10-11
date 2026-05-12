@@ -226,7 +226,10 @@ class Controller:
         
         self.is_calibrating = False
         self.calibration_end_time = 0
-        self.gyro_bias = tuple(getattr(CONFIG, "gyro_bias", [0.0, 0.0, 0.0]))
+        
+        # Set defaults, will load actual calibration offsets after connecting and getting device info
+        self.gyro_bias = (0.0, 0.0, 0.0)
+            
         self.stick_r_bias = tuple(getattr(CONFIG, "stick_r_bias", [0.0, 0.0]))
         self.calibration_samples_gyro = []
         self.calibration_samples_stick = []
@@ -239,9 +242,6 @@ class Controller:
         self.calibration_end_time = time.perf_counter() + 2.0
         self.calibration_samples_gyro = []
         self.calibration_samples_stick = []
-        
-        self.interp_running = False
-        self.interp_thread = None
         
         logger.info(f"Calibration started for {self.device.address}. Please keep the controller stationary...")
     
@@ -289,6 +289,16 @@ class Controller:
         await self.client.start_notify(COMMAND_RESPONSE_UUID, command_response_callback)
 
         self.controller_info = await self.read_controller_info()
+        
+        # After getting controller info, prioritize loading specific calibration from MAC address
+        addr = self.device.address
+        if addr in CONFIG.calibration_data:
+            self.gyro_bias = tuple(CONFIG.calibration_data[addr])
+            logger.info(f"Loaded per-device calibration for {addr}")
+        elif self.is_joycon_left():
+            self.gyro_bias = tuple(getattr(CONFIG, "gyro_bias_l", [0.0, 0.0, 0.0]))
+        else:
+            self.gyro_bias = tuple(getattr(CONFIG, "gyro_bias_r", [0.0, 0.0, 0.0]))
         self.stick_calibration, self.second_stick_calibration = await self.read_calibration_data()
 
         await self.enable_input_notify_callback()
@@ -334,8 +344,11 @@ class Controller:
         self.interp_running = False
         if self.client:
             if self.client.is_connected:
-                logger.info(f"正在與 {self.device.address} 斷開藍牙連結...")
-                await self.client.disconnect()
+                logger.info(f"Disconnecting Bluetooth from {self.device.address}...")
+                try:
+                    await asyncio.wait_for(self.client.disconnect(), timeout=1.5)
+                except Exception:
+                    pass
             self.client = None
 
     ### Commands & Features ###
@@ -479,7 +492,10 @@ class Controller:
                 self.side_buttons_pressed = True
 
             self.simulate_mouse(inputData)
-            self.simulate_gyro_mouse(inputData, trigger_gyro)
+            # Record own trigger state and use shared trigger (for combined mode cross-controller activation)
+            self._own_gyro_trigger = trigger_gyro
+            effective_gyro_trigger = trigger_gyro or getattr(self, '_shared_gyro_trigger', False)
+            self.simulate_gyro_mouse(inputData, effective_gyro_trigger)
 
             if self.input_report_callback is not None:
                 self.input_report_callback(inputData, self)
@@ -504,7 +520,7 @@ class Controller:
 
                 inputData.buttons &= ~(mouseButtonsConfig.left_button | mouseButtonsConfig.middle_button | mouseButtonsConfig.right_button)
 
-                if self.previous_mouse_state is not None:
+                if getattr(self, 'previous_mouse_state', None) is not None:
                     dx = signed_looping_difference_16bit(self.previous_mouse_state.x, x)
                     dy = signed_looping_difference_16bit(self.previous_mouse_state.y ,y)
 
@@ -530,7 +546,7 @@ class Controller:
                     if abs(scroll_value) > 0.2:
                         win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0, int(scroll_value * 60 * mouse_config.scroll_sensitivity), 0)
                         
-                self.previous_mouse_state = MouseState(x, y, lb, mb, rb)
+                self.previous_mouse_state = MouseState(x, y, bool(lb), bool(mb), bool(rb))
             else:
                 self.previous_mouse_state = None
                 self.jc_target_vx = 0.0
@@ -541,10 +557,19 @@ class Controller:
             self.jc_target_vy = 0.0
 
     def simulate_gyro_mouse(self, inputData: ControllerInputData, trigger_pressed: bool):
-        if not (self.is_pro_controller() or self.is_joycon_right()):
+        if not getattr(self, 'gyro_active', True):
+            # Reset all speed states to prevent drift when switching Gyro sides
+            self.gyro_target_vx = 0.0
+            self.gyro_target_vy = 0.0
+            self.current_vx = 0.0
+            self.current_vy = 0.0
+            self.interp_residual_x = 0.0
+            self.interp_residual_y = 0.0
+            self.gyro_mouse_enabled = False
             return
 
         activation_mode = getattr(CONFIG, "gyro_activation_mode", "Toggle")
+
 
         if getattr(self, 'is_calibrating', False):
             if time.perf_counter() < self.calibration_end_time:
@@ -560,15 +585,23 @@ class Controller:
                     gz = sum(s[2] for s in self.calibration_samples_gyro) / len(self.calibration_samples_gyro)
                     self.gyro_bias = (gx, gy, gz)
                     
-                    logger.info(f"Calibration complete. Gyro bias: ({gx:.1f}, {gy:.1f}, {gz:.1f})")
+                    logger.info(f"Calibration complete for {self.device.address}. Gyro bias: ({gx:.1f}, {gy:.1f}, {gz:.1f})")
                     
-                    CONFIG.gyro_bias = list(self.gyro_bias)
-                    CONFIG.save_calibration()
+                    # Store device-specific calibration data
+                    CONFIG.calibration_data[self.device.address] = list(self.gyro_bias)
+                    
+                    if self.is_joycon_left():
+                        CONFIG.gyro_bias_l = list(self.gyro_bias)
+                    else:
+                        CONFIG.gyro_bias_r = list(self.gyro_bias)
+                    CONFIG.save_config()
 
         bias_threshold = 5  
-        bx = self.gyro_bias[0] if abs(self.gyro_bias[0]) > bias_threshold else 0.0
-        by = self.gyro_bias[1] if abs(self.gyro_bias[1]) > bias_threshold else 0.0
-        bz = self.gyro_bias[2] if abs(self.gyro_bias[2]) > bias_threshold else 0.0
+        bx, by, bz = self.gyro_bias
+        # Ignore if bias is extremely small
+        bx = bx if abs(bx) > bias_threshold else 0.0
+        by = by if abs(by) > bias_threshold else 0.0
+        bz = bz if abs(bz) > bias_threshold else 0.0
         
         raw_gx, raw_gy, raw_gz = inputData.gyroscope
         gyro_x = raw_gx - bx
@@ -597,8 +630,12 @@ class Controller:
         self.gr_was_pressed = trigger_pressed
 
         if self.gyro_mouse_enabled:
-            rx, ry = inputData.right_stick
-            inputData.right_stick = (0, 0)
+            if self.is_joycon_left():
+                rx, ry = inputData.left_stick
+                inputData.left_stick = (0, 0)
+            else:
+                rx, ry = inputData.right_stick
+                inputData.right_stick = (0, 0)
             
             target_vx = 0.0
             target_vy = 0.0
@@ -621,17 +658,27 @@ class Controller:
                 inputData.left_stick = (steer_value, inputData.left_stick[1])
 
             else:
-                if abs(gyro_x) > gyro_deadzone or abs(gyro_z) > gyro_deadzone:
+                if abs(gyro_x) > gyro_deadzone or abs(gyro_z) > gyro_deadzone or abs(gyro_y) > gyro_deadzone:
                     sensitivity = getattr(CONFIG, "gyro_sensitivity", 0.3)
-                    horizontal_val = -gyro_z 
+                    horizontal_val = -gyro_z
                     
                     eff_h = 0
                     if horizontal_val > gyro_deadzone: eff_h = horizontal_val - gyro_deadzone
                     elif horizontal_val < -gyro_deadzone: eff_h = horizontal_val + gyro_deadzone
                         
+                    hold_mode = getattr(self, "hold_mode", "Horizontal")
+                    if self.is_pro_controller():
+                        vertical_val = gyro_x
+                    elif hold_mode == "Vertical":
+                        vertical_val = gyro_x
+                    elif self.is_joycon_left():
+                        vertical_val = -gyro_y  # Left Joycon horizontal Y axis is reversed
+                    else:
+                        vertical_val = gyro_y
+
                     eff_v = 0
-                    if gyro_x > gyro_deadzone: eff_v = gyro_x - gyro_deadzone
-                    elif gyro_x < -gyro_deadzone: eff_v = gyro_x + gyro_deadzone
+                    if vertical_val > gyro_deadzone: eff_v = vertical_val - gyro_deadzone
+                    elif vertical_val < -gyro_deadzone: eff_v = vertical_val + gyro_deadzone
                     
                     accel_factor = 0.002 
                     
@@ -682,8 +729,12 @@ class Controller:
         last_time = time.perf_counter()
         while self.interp_running:
             if self.client and self.client.is_connected and (self.gyro_mouse_enabled or getattr(self, 'jc_mouse_active', False)):
-                self.current_vx = self.gyro_target_vx + getattr(self, 'jc_target_vx', 0.0)
-                self.current_vy = self.gyro_target_vy + getattr(self, 'jc_target_vy', 0.0)
+                if getattr(self, 'is_calibrating', False):
+                    self.current_vx = 0.0
+                    self.current_vy = 0.0
+                else:
+                    self.current_vx = self.gyro_target_vx + getattr(self, 'jc_target_vx', 0.0)
+                    self.current_vy = self.gyro_target_vy + getattr(self, 'jc_target_vy', 0.0)
 
                 now = time.perf_counter()
                 dt = now - last_time
