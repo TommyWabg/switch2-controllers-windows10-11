@@ -16,6 +16,10 @@ This fork is heavily optimized for Windows 10/11 users, featuring a fully intera
 * **1-Click Gyro Calibration:** Built-in calibration tool to instantly calculate and permanently save sensor bias, eliminating gyro drift.
 * **Custom Extra Button Remapping:** Fully remap extra buttons like `GL`, `GR`, `SL_R`, `SR_L` and `Chat` to function as Gyro triggers, PS4 trackpad click or standard buttons.
 * **Joy-con Mouse Toggle:** A new dedicated switch in the GUI to enable or disable the Joy-con mouse mode. This prevents accidental cursor movement during gameplay.
+* * **Dynamic Split & Merge System:** The new **Split** and **Merge** features allow you to detach combined Joy-cons into two individual controllers or combine single Joy-cons into one unified virtual gamepad without restarting.
+* **Vertical & Horizontal Hold Modes Switch (V/H):** Added V/H switch buttons, allowing users to toggle between Vertical (standard upright) and Horizontal (sideways) hold modes for single Joy-cons.
+* **Dual-Controller Gyro Selection (L/R Gyro):** When using a pair of Joy-cons as a single virtual controller, you can now manually select which Joy-con (Left or Right) provides the motion data. This allows for greater flexibility, letting you choose your preferred hand for gyro aiming or motion controls.
+* * * **Interactive Controller Identification:** Added a dedicated **Vibrate** button for each player slot. This allows for instant physical feedback, helping you quickly identify which Joy-con belongs to which player in a multiplayer setup.
 * **Haptic & OS Integration:** Added rumble feedback (including a connection confirmation rumble) and mapped the Capture button to native Windows screenshots (`Win + PrtScn`).
 * **One-Click Disconnect:** Added a convenient 'X' button to the top right of each connected controller's UI block. You can now manually disconnect specific controllers directly from the interface without needing to power them off physically.
 * **Standalone Executable (.exe):** Fully packed with all dependencies (including vgamepad DLLs). No Python installation required.
