@@ -286,7 +286,15 @@ class Controller:
         def command_response_callback(sender: BleakGATTCharacteristic, data: bytearray):
             if self.response_future:
                 self.response_future.set_result(data)
-        await self.client.start_notify(COMMAND_RESPONSE_UUID, command_response_callback)
+        
+        for attempt in range(3):
+            try:
+                await self.client.start_notify(COMMAND_RESPONSE_UUID, command_response_callback)
+                break
+            except Exception as e:
+                if attempt == 2: raise
+                logger.warning(f"Notify failed, retry {attempt+1}: {e}")
+                await asyncio.sleep(1.0)
 
         self.controller_info = await self.read_controller_info()
         
@@ -491,11 +499,20 @@ class Controller:
             if inputData.buttons & (SWITCH_BUTTONS.get("SR_R", 0) | SWITCH_BUTTONS.get("SL_R", 0) | SWITCH_BUTTONS.get("SL_L", 0) | SWITCH_BUTTONS.get("SR_L", 0)):
                 self.side_buttons_pressed = True
 
-            self.simulate_mouse(inputData)
-            # Record own trigger state and use shared trigger (for combined mode cross-controller activation)
-            self._own_gyro_trigger = trigger_gyro
-            effective_gyro_trigger = trigger_gyro or getattr(self, '_shared_gyro_trigger', False)
-            self.simulate_gyro_mouse(inputData, effective_gyro_trigger)
+            if getattr(self, 'is_calibrating', False):
+                self.simulate_gyro_mouse(inputData, False)
+            else:
+                self.simulate_mouse(inputData)
+                # Record own trigger state and use shared trigger (for combined mode cross-controller activation)
+                self._own_gyro_trigger = trigger_gyro
+                self._own_zr_pressed = bool(inputData.buttons & SWITCH_BUTTONS.get("ZR", 0))
+                self._own_zl_pressed = bool(inputData.buttons & SWITCH_BUTTONS.get("ZL", 0))
+                
+                effective_gyro_trigger = trigger_gyro or getattr(self, '_shared_gyro_trigger', False)
+                effective_zr = self._own_zr_pressed or getattr(self, '_shared_zr_pressed', False)
+                effective_zl = self._own_zl_pressed or getattr(self, '_shared_zl_pressed', False)
+                
+                self.simulate_gyro_mouse(inputData, effective_gyro_trigger, effective_zr, effective_zl)
 
             if self.input_report_callback is not None:
                 self.input_report_callback(inputData, self)
@@ -517,7 +534,7 @@ class Controller:
                 lb = inputData.buttons & mouseButtonsConfig.left_button
                 mb = inputData.buttons & mouseButtonsConfig.middle_button
                 rb = inputData.buttons & mouseButtonsConfig.right_button
-
+                
                 inputData.buttons &= ~(mouseButtonsConfig.left_button | mouseButtonsConfig.middle_button | mouseButtonsConfig.right_button)
 
                 if getattr(self, 'previous_mouse_state', None) is not None:
@@ -556,7 +573,7 @@ class Controller:
             self.jc_target_vx = 0.0
             self.jc_target_vy = 0.0
 
-    def simulate_gyro_mouse(self, inputData: ControllerInputData, trigger_pressed: bool):
+    def simulate_gyro_mouse(self, inputData: ControllerInputData, trigger_pressed: bool, zr_pressed: bool, zl_pressed: bool):
         if not getattr(self, 'gyro_active', True):
             # Reset all speed states to prevent drift when switching Gyro sides
             self.gyro_target_vx = 0.0
@@ -574,7 +591,11 @@ class Controller:
         if getattr(self, 'is_calibrating', False):
             if time.perf_counter() < self.calibration_end_time:
                 self.calibration_samples_gyro.append(inputData.gyroscope)
-                inputData.right_stick = (0, 0) 
+                # Ensure ALL output variables are zeroed during calibration to stop leakage
+                inputData.left_stick = (0.0, 0.0)
+                inputData.right_stick = (0.0, 0.0)
+                inputData.gyroscope = (0.0, 0.0, 0.0)
+                inputData.accelerometer = (0.0, 0.0, 0.0)
                 return
             else:
                 self.is_calibrating = False
@@ -703,8 +724,9 @@ class Controller:
             self.gyro_target_vx = target_vx
             self.gyro_target_vy = target_vy
 
-            current_zr = bool(inputData.buttons & SWITCH_BUTTONS.get("ZR", 0))
-            current_zl = bool(inputData.buttons & SWITCH_BUTTONS.get("ZL", 0))
+            # Gyro Mouse Clicks (Hardcoded to ZR/ZL as requested)
+            current_zr = zr_pressed
+            current_zl = zl_pressed
 
             if current_zr and not self.prev_zr: win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
             elif not current_zr and self.prev_zr: win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
