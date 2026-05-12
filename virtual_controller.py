@@ -404,7 +404,6 @@ class VirtualController:
             if buttons & SWITCH_BUTTONS["X"]: xb_btns |= XB_BUTTONS["Y"]
             if buttons & SWITCH_BUTTONS["Y"]: xb_btns |= XB_BUTTONS["X"]
 
-            # 處理按鍵對調邏輯 (套用至 R Joycon 所有模式，及 L Joycon)
             apply_swap = True 
 
             if apply_swap:
