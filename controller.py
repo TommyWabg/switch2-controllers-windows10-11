@@ -500,7 +500,7 @@ class Controller:
                 self.side_buttons_pressed = True
 
             if getattr(self, 'is_calibrating', False):
-                self.simulate_gyro_mouse(inputData, False)
+                self.simulate_gyro_mouse(inputData, False, False, False)
             else:
                 self.simulate_mouse(inputData)
                 # Record own trigger state and use shared trigger (for combined mode cross-controller activation)
@@ -573,7 +573,7 @@ class Controller:
             self.jc_target_vx = 0.0
             self.jc_target_vy = 0.0
 
-    def simulate_gyro_mouse(self, inputData: ControllerInputData, trigger_pressed: bool, zr_pressed: bool, zl_pressed: bool):
+    def simulate_gyro_mouse(self, inputData: ControllerInputData, trigger_pressed: bool = False, zr_pressed: bool = False, zl_pressed: bool = False):
         if not getattr(self, 'gyro_active', True):
             # Reset all speed states to prevent drift when switching Gyro sides
             self.gyro_target_vx = 0.0
