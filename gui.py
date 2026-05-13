@@ -7,6 +7,7 @@ import yaml
 import logging
 import asyncio
 import os
+import ctypes
 from controller import Controller
 from discoverer import start_discoverer, set_shutting_down
 from config import get_resource, CONFIG, BACK_BUTTON_OPTIONS
@@ -334,9 +335,20 @@ class ControllerWindow:
         self.quit_event = threading.Event()
     
     def init_interface(self):
+        # Set AppUserModelID to ensure the taskbar icon is shown correctly on Windows
+        try:
+            myappid = 'tommy.switch2.controllers.0.4.2'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception:
+            pass
+
         self.root = tk.Tk()
-        photo = tk.PhotoImage(file = get_resource('images/icon.png'))
-        self.root.wm_iconphoto(False, photo)
+        try:
+            photo = tk.PhotoImage(file=get_resource('images/icon.png'))
+            self.root.wm_iconphoto(False, photo)
+        except Exception as e:
+            logger.warning(f"Failed to load window icon: {e}")
+            
         self.root.title("Switch2 Controllers")
         
         self.root.geometry("1000x580+50+50") 

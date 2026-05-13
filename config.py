@@ -130,62 +130,6 @@ class MouseConfig:
         self.joycon_l_buttons = MouseButtonConfig(buttons_config.get("left_joycon", {}))
         self.joycon_r_buttons = MouseButtonConfig(buttons_config.get("right_joycon", {}))
 
-class Config:
-    def __init__(self, config_file_path: str):
-        self.config_file_path = config_file_path
-        
-        config = {} 
-        
-        if not os.path.exists(config_file_path):
-            logger.warning(f"Config file not found at {config_file_path}, using defaults.")
-        else:
-            try:
-                with open(config_file_path, 'r', encoding='utf-8') as cf:
-                    config = yaml.safe_load(cf) or {}
-            except Exception as e:
-                logger.error(f"Error loading config file: {e}")
-
-        self.combine_joycons = config.get("combine_joycons", True)
-        self.deadzone = config.get("deadzone", 50)
-        self.controller_mode = config.get("controller_mode", "Xbox")
-
-        btns = config.get("buttons", {})
-        self.dual_joycons_config = ButtonConfig(btns.get("dual_joycons", {}))
-        self.single_joycon_l_config = ButtonConfig(btns.get("single_joycon_l", {}))
-        self.single_joycon_r_config = ButtonConfig(btns.get("single_joycon_r", {}))
-        self.procon_config = ButtonConfig(btns.get("procon", {}))
-
-        self.mouse_config = MouseConfig(config.get("mouse", {}))
-        self.gl_mapping = config.get("gl_mapping", "None")
-        self.gr_mapping = config.get("gr_mapping", "Gyro")
-        self.c_mapping = config.get("c_mapping", "None")
-        self.abxy_mode = config.get("abxy_mode", "Xbox")
-        
-        self.gyro_mode = config.get("gyro_mode", "Yaw")
-        self.gyro_sensitivity = float(config.get("gyro_sensitivity", 0.3))
-        self.gyro_smoothing = float(config.get("gyro_smoothing", 0.0))
-        self.gyro_activation_mode = config.get("gyro_activation_mode", "Toggle")
-        self.stick_mouse_sensitivity = float(config.get("stick_mouse_sensitivity", 5.0))
-        
-        self.gyro_bias = config.get("gyro_bias", [0.0, 0.0, 0.0])
-        self.stick_r_bias = config.get("stick_r_bias", [0.0, 0.0])
-
-        logger.info(f"Config successfully loaded from {config_file_path}")
-        
-    def save_calibration(self):
-        try:
-            with open(self.config_file_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f) or {}
-            
-            data['gyro_bias'] = self.gyro_bias
-            data['stick_r_bias'] = self.stick_r_bias
-            
-            with open(self.config_file_path, 'w', encoding='utf-8') as f:
-                yaml.dump(data, f, default_flow_style=False)
-            logger.info("Calibration data saved to config.yaml permanently.")
-        except Exception as e:
-            logger.error(f"Failed to save calibration: {e}")
-
 def get_resource(resource_path: str):
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, 'resources', resource_path)
@@ -251,8 +195,12 @@ class Config:
         
     def save_config(self):
         try:
-            with open(self.config_file_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f) or {}
+            # Read current file to preserve comments/other sections if possible
+            # (Though yaml.dump will lose comments anyway, but we load first)
+            data = {}
+            if os.path.exists(self.config_file_path):
+                with open(self.config_file_path, 'r', encoding='utf-8') as f:
+                    data = yaml.safe_load(f) or {}
             
             data['simulation_mode'] = self.simulation_mode
             data['abxy_mode'] = self.abxy_mode
@@ -284,3 +232,4 @@ class Config:
             logger.error(f"Failed to save config: {e}")
     
 CONFIG = Config(get_resource("config.yaml"))
+
