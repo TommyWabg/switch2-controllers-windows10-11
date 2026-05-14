@@ -97,9 +97,21 @@ class StickCalibrationData:
     min: tuple[int, int]
 
     def __init__(self, data: bytes):
-        self.center = get_stick_xy(data[0:3])
-        self.max = get_stick_xy(data[3:6])
-        self.min = get_stick_xy(data[6:9])
+        if len(data) >= 9:
+            self.center = get_stick_xy(data[0:3])
+            # Max/min are absolute offsets from center
+            self.max = get_stick_xy(data[3:6])
+            self.min = get_stick_xy(data[6:9])
+            
+            # Sanity check: if calibration is all zeros/FF, use defaults to prevent stuck stick
+            if self.center == (0, 0) and self.max == (0, 0):
+                self.center = (2048, 2048)
+                self.max = (1500, 1500)
+                self.min = (1500, 1500)
+        else:
+            self.center = (2048, 2048)
+            self.max = (1500, 1500)
+            self.min = (1500, 1500)
 
     def apply_calibration(self, raw_values: tuple[int, int]):
         return (apply_calibration_to_axis(raw_values[0], self.center[0], self.max[0], self.min[0]), 
@@ -317,7 +329,7 @@ class Controller:
         self.interp_thread = threading.Thread(target=self._interpolation_thread_loop, daemon=True)
         self.interp_thread.start()
 
-        logger.info(f"Successfully initialized {self.device.address} : {self.controller_info}")
+        logger.info(f"Successfully initialized {self.device.address} ({self.controller_info.product_id:04x}) : {self.controller_info}")
         try:
             bass_thump = VibrationData(lf_freq=0x060, lf_amp=0x350, hf_freq=0x0c0, hf_amp=0x250)
             sharp_click = VibrationData(hf_freq=0x1e2, hf_amp=0x300, lf_amp=0x030)
@@ -438,29 +450,35 @@ class Controller:
                 "GR": bool(inputData.buttons & 0x01000000),
                 "C":  bool(inputData.buttons & 0x00004000),
                 "CAPT": bool(inputData.buttons & 0x00002000),
+                "SL_L": bool(inputData.buttons & 0x00200000),
+                "SR_L": bool(inputData.buttons & 0x00100000),
                 "SL_R": bool(inputData.buttons & 0x00000020),
-                "SR_L": bool(inputData.buttons & 0x00100000) 
+                "SR_R": bool(inputData.buttons & 0x00000010)
             }
 
-            inputData.buttons &= ~(0x03106020)
+            inputData.buttons &= ~(0x03306030)
 
             trigger_gyro = False
             trigger_screenshot = btn_states["CAPT"]
             trigger_key_c = False
 
             mapping_pairs = [
-                (btn_states["GL"], getattr(CONFIG, "gl_mapping", "None")),
-                (btn_states["GR"], getattr(CONFIG, "gr_mapping", "None")),
-                (btn_states["C"],  getattr(CONFIG, "c_mapping", "None")),
-                (btn_states["SL_R"], getattr(CONFIG, "slr_mapping", "None")),
-                (btn_states["SR_L"], getattr(CONFIG, "srl_mapping", "None"))
+                (btn_states["GL"], getattr(CONFIG, "gl_mapping", "None"), 0x02000000),
+                (btn_states["GR"], getattr(CONFIG, "gr_mapping", "None"), 0x01000000),
+                (btn_states["C"],  getattr(CONFIG, "c_mapping", "None"), 0x00004000),
+                (btn_states["SL_L"], getattr(CONFIG, "sll_mapping", "None"), 0x00200000),
+                (btn_states["SR_L"], getattr(CONFIG, "srl_mapping", "None"), 0x00100000),
+                (btn_states["SL_R"], getattr(CONFIG, "slr_mapping", "None"), 0x00000020),
+                (btn_states["SR_R"], getattr(CONFIG, "srr_mapping", "None"), 0x00000010)
             ]
 
-            for is_pressed, action in mapping_pairs:
+            for is_pressed, action, original_bit in mapping_pairs:
                 if is_pressed:
                     if action == "Gyro": trigger_gyro = True
                     elif action == "CAPT": trigger_screenshot = True
                     elif action == "C": trigger_key_c = True
+                    elif action == "None":
+                        inputData.buttons |= original_bit
                     elif action in SWITCH_BUTTONS:
                         inputData.buttons |= SWITCH_BUTTONS[action]
 
@@ -555,10 +573,8 @@ class Controller:
 
                     if self.is_joycon_right():
                         scroll_value = inputData.right_stick[1]
-                        inputData.right_stick = 0,0
                     else:
                         scroll_value = inputData.left_stick[1]
-                        inputData.left_stick = 0,0
 
                     if abs(scroll_value) > 0.2:
                         win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0, int(scroll_value * 60 * mouse_config.scroll_sensitivity), 0)

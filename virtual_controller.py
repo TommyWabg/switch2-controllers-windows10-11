@@ -34,8 +34,8 @@ class VirtualController:
         self.previous_buttons_left = 0x00000000
         self.previous_buttons_right = 0x00000000
         self.next_vibration_event = None
-        self.loop = None
         self.vg_controller = None
+        self.loop = None
         self.touch_tracking_id = 0
         self.was_touching = False
         
@@ -395,71 +395,61 @@ class VirtualController:
 
     def update_as_xbox(self, inputData: ControllerInputData, buttons: int, controller: Controller, buttonsConfig: ButtonConfig):
         with self.state_lock:
-            # Phase 1: Button Mapping (Aligned with PS4 direct approach)
+            # Phase 1: Button Mapping (Respects GUI layout setting)
             xb_btns = 0
-            
-            # Direct mapping (Nintendo labels -> Xbox labels)
-            if buttons & SWITCH_BUTTONS["A"]: xb_btns |= XB_BUTTONS["B"]
-            if buttons & SWITCH_BUTTONS["B"]: xb_btns |= XB_BUTTONS["A"]
-            if buttons & SWITCH_BUTTONS["X"]: xb_btns |= XB_BUTTONS["Y"]
-            if buttons & SWITCH_BUTTONS["Y"]: xb_btns |= XB_BUTTONS["X"]
-
-            apply_swap = True 
-
-            if apply_swap:
-                new_face = 0
-                if xb_btns & XB_BUTTONS["A"]: new_face |= XB_BUTTONS["B"]
-                if xb_btns & XB_BUTTONS["B"]: new_face |= XB_BUTTONS["A"]
-                if xb_btns & XB_BUTTONS["X"]: new_face |= XB_BUTTONS["Y"]
-                if xb_btns & XB_BUTTONS["Y"]: new_face |= XB_BUTTONS["X"]
-                xb_btns = (xb_btns & ~0xF000) | new_face
-            
-            
-
-            # Shoulders and Triggers
+            if CONFIG.abxy_mode == "Xbox":
+                # Labels match logic (Y->Y, X->X, B->B, A->A)
+                if buttons & SWITCH_BUTTONS["Y"]: xb_btns |= XB_BUTTONS["Y"]
+                if buttons & SWITCH_BUTTONS["X"]: xb_btns |= XB_BUTTONS["X"]
+                if buttons & SWITCH_BUTTONS["B"]: xb_btns |= XB_BUTTONS["B"]
+                if buttons & SWITCH_BUTTONS["A"]: xb_btns |= XB_BUTTONS["A"]
+            else: # Switch layout
+                # Swapped to match labels as requested (A->A, B->B, X->X, Y->Y)
+                if buttons & SWITCH_BUTTONS["Y"]: xb_btns |= XB_BUTTONS["Y"]
+                if buttons & SWITCH_BUTTONS["X"]: xb_btns |= XB_BUTTONS["X"]
+                if buttons & SWITCH_BUTTONS["B"]: xb_btns |= XB_BUTTONS["B"]
+                if buttons & SWITCH_BUTTONS["A"]: xb_btns |= XB_BUTTONS["A"]
+                    
             if buttons & SWITCH_BUTTONS["L"]: xb_btns |= XB_BUTTONS["LB"]
             if buttons & SWITCH_BUTTONS["R"]: xb_btns |= XB_BUTTONS["RB"]
+            
             lt = 255 if (buttons & SWITCH_BUTTONS["ZL"]) else 0
             rt = 255 if (buttons & SWITCH_BUTTONS["ZR"]) else 0
             
-            # System Buttons (Matches PS4 Share/Options/PS)
-            if buttons & SWITCH_BUTTONS["PLUS"]: xb_btns |= XB_BUTTONS["START"]
             if buttons & SWITCH_BUTTONS["MINUS"]: xb_btns |= XB_BUTTONS["BACK"]
-            if buttons & SWITCH_BUTTONS.get("HOME", 0): xb_btns |= XB_BUTTONS["GUIDE"]
-            if buttons & SWITCH_BUTTONS.get("CAPT", 0): xb_btns |= XB_BUTTONS["BACK"]
+            if buttons & SWITCH_BUTTONS["PLUS"]: xb_btns |= XB_BUTTONS["START"]
+            if buttons & SWITCH_BUTTONS["L_STK"]: xb_btns |= XB_BUTTONS["L_STK"]
+            if buttons & SWITCH_BUTTONS["R_STK"]: xb_btns |= XB_BUTTONS["R_STK"]
             
-            # D-pad and Stick Clicks
             if buttons & SWITCH_BUTTONS["UP"]: xb_btns |= XB_BUTTONS["UP"]
             if buttons & SWITCH_BUTTONS["DOWN"]: xb_btns |= XB_BUTTONS["DOWN"]
             if buttons & SWITCH_BUTTONS["LEFT"]: xb_btns |= XB_BUTTONS["LEFT"]
             if buttons & SWITCH_BUTTONS["RIGHT"]: xb_btns |= XB_BUTTONS["RIGHT"]
-            if buttons & SWITCH_BUTTONS["L_STK"]: xb_btns |= XB_BUTTONS["L_STK"]
-            if buttons & SWITCH_BUTTONS["R_STK"]: xb_btns |= XB_BUTTONS["R_STK"]
+            
+            if buttons & SWITCH_BUTTONS.get("HOME", 0): xb_btns |= XB_BUTTONS["GUIDE"]
+            if buttons & SWITCH_BUTTONS.get("CAPT", 0): xb_btns |= XB_BUTTONS["BACK"]
 
-            # Phase 2: Stick and Click Routing (State Aware)
-            # Initialize persistent states if they don't exist
-            if not hasattr(self, "last_xb_lx"): self.last_xb_lx = 0.0
-            if not hasattr(self, "last_xb_ly"): self.last_xb_ly = 0.0
-            if not hasattr(self, "last_xb_rx"): self.last_xb_rx = 0.0
-            if not hasattr(self, "last_xb_ry"): self.last_xb_ry = 0.0
+            # Phase 2: Stick Routing (Mirrored from PS4 logic)
+            if not hasattr(self, 'last_xb_lx'):
+                self.last_xb_lx = 0.0; self.last_xb_ly = 0.0
+                self.last_xb_rx = 0.0; self.last_xb_ry = 0.0
 
             if len(self.controllers) == 1:
-                # Single Joycon logic (respects callback's routing/rotation)
-                # Matches PS4 lines 313-328
                 if controller.is_joycon_right():
                     if self.hold_mode == "Vertical":
-                        self.last_xb_lx = 0.0; self.last_xb_ly = 0.0
-                        self.last_xb_rx = inputData.right_stick[0]; self.last_xb_ry = inputData.right_stick[1]
-                    else: # Horizontal
-                        self.last_xb_lx = inputData.right_stick[0]; self.last_xb_ly = inputData.right_stick[1]
-                        self.last_xb_rx = 0.0; self.last_xb_ry = 0.0
-                        # Route Click
-                        if buttons & SWITCH_BUTTONS["R_STK"]:
-                            xb_btns &= ~XB_BUTTONS["R_STK"]; xb_btns |= XB_BUTTONS["L_STK"]
-                    # Callback handles L-V routing to right_stick field
-                    self.last_xb_lx = inputData.left_stick[0]; self.last_xb_ly = inputData.left_stick[1]
-                    self.last_xb_rx = inputData.right_stick[0]; self.last_xb_ry = inputData.right_stick[1]
-            else: # Merge Mode: Only update the side that reported
+                        # Vertical: R Joycon controls virtual right stick
+                        self.last_xb_rx = inputData.right_stick[0]
+                        self.last_xb_ry = inputData.right_stick[1]
+                    else:
+                        # Horizontal: R Joycon controls virtual left stick
+                        self.last_xb_lx = inputData.right_stick[0]
+                        self.last_xb_ly = inputData.right_stick[1]
+                else:
+                    self.last_xb_lx = inputData.left_stick[0]
+                    self.last_xb_ly = inputData.left_stick[1]
+                    self.last_xb_rx = inputData.right_stick[0]
+                    self.last_xb_ry = inputData.right_stick[1]
+            else:
                 if controller.is_joycon_left():
                     self.last_xb_lx = inputData.left_stick[0]
                     self.last_xb_ly = inputData.left_stick[1]
@@ -467,7 +457,7 @@ class VirtualController:
                     self.last_xb_rx = inputData.right_stick[0]
                     self.last_xb_ry = inputData.right_stick[1]
 
-            # Phase 2.5: Gyro/Accel Remapping (Cloned from PS4 lines 329-350)
+            # Phase 3: Gyro/Accel (Mirrored from PS4)
             if self.hold_mode == "Horizontal" and not controller.is_pro_controller():
                 if controller.is_joycon_right():
                     self.last_gx = inputData.gyroscope[1]
@@ -491,14 +481,13 @@ class VirtualController:
                 self.last_ay = inputData.accelerometer[2]
                 self.last_az = -inputData.accelerometer[1]
 
-            # Phase 3: Final Reporting (Using persistent state to avoid flickering)
+            # Phase 4: Final Reporting
             self.vg_controller.report.wButtons = xb_btns
             self.vg_controller.left_trigger(lt)
             self.vg_controller.right_trigger(rt)
             self.vg_controller.left_joystick_float(self.last_xb_lx, self.last_xb_ly)
             self.vg_controller.right_joystick_float(self.last_xb_rx, self.last_xb_ry)
 
-            # Extended Gyro/Accel Reporting (Cloned from PS4 lines 373-379)
             def clamp_short(val): return max(-32768, min(32767, int(val)))
             self.vg_controller.report.wGyroX = clamp_short(self.last_gx)
             self.vg_controller.report.wGyroY = clamp_short(self.last_gy)
