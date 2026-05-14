@@ -11,6 +11,7 @@ This fork is heavily optimized for Windows 10/11 users, featuring a fully intera
 * **On-the-Fly Layout Switching:** No more multiple executables! Instantly toggle between **Nintendo Layout** (matching physical labels) and **Xbox Layout** (standard PC positioning) directly from the UI.
 * **1000Hz Interpolation:** 1000Hz interpolation loop for ultra-smooth, jitter-free gyro motion rendering with both Switch 2 Right Joy-con and Pro Controller. **Gyro Mouse**, **Joy-con Mouse**, and **Steam Gyro** now output smoother and lag-free movement at 1000Hz.
 * **Gyro Racing Wheel Mode (Steering):** Reads the controller's absolute tilt (accelerometer) and maps it directly to the Left Analog Stick's X-axis.
+* **9-Axis Mouse Mode (Magnetometer Support):** 9-axis motion controled mouse by leveraging the controllers' magnetometer. This provides absolute orientation tracking and eliminates long-term yaw drift. 
 * **6-Axis Mouse Mode:** Play shooters or navigate through UI with high-polling rate gyro mouse control. RT and LT act as left and right mouse click when gyro mouse is activated. This mode self-levels horizontal and vertical input regardless of controller tilt.
 * **Stick Assist:** Allowing the right thumbstick to work alongside gyro aiming.
 * **Gyro Calibration:** **Calibrate Gyro** button for calculate and permanently save sensor bias, eliminating gyro drift.
