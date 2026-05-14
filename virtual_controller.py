@@ -56,7 +56,6 @@ class VirtualController:
                 self.vg_controller.unregister_notification()
             except Exception:
                 pass
-            del self.vg_controller
             self.vg_controller = None
 
         if self.mode == "PS4":
@@ -144,17 +143,47 @@ class VirtualController:
             
             # In combined mode, share gyro trigger from any side to all controllers
             # Allows the gyro-active controller to receive the trigger signal
-            if len(self.controllers) == 2:
+            is_merged = (len(self.controllers) == 2)
+            for c in self.controllers:
+                c.is_merged = is_merged
+
+            if is_merged:
                 # Sync Gyro Trigger
                 shared_gyro = any(getattr(c, '_own_gyro_trigger', False) for c in self.controllers)
                 # Sync ZR/ZL for Gyro Mouse clicks
                 shared_zr = any(getattr(c, '_own_zr_pressed', False) for c in self.controllers)
                 shared_zl = any(getattr(c, '_own_zl_pressed', False) for c in self.controllers)
                 
+                # Sync Steer Value (From the gyro-active controller)
+                shared_steer = 0.0
+                shared_rs = (0.0, 0.0)
+                for c in self.controllers:
+                    if getattr(c, 'gyro_active', False):
+                        shared_steer = getattr(c, '_own_steer_value', 0.0)
+                    if c.is_joycon_right():
+                        shared_rs = inputData.right_stick if c == controller else getattr(c, '_last_rs', (0.0, 0.0))
+
                 for c in self.controllers:
                     c._shared_gyro_trigger = shared_gyro
                     c._shared_zr_pressed = shared_zr
                     c._shared_zl_pressed = shared_zl
+                    c._shared_steer_value = shared_steer
+                    c._shared_right_stick = shared_rs
+                
+                if controller.is_joycon_right():
+                    controller._last_rs = inputData.right_stick
+                
+                # Sync activation state across controllers for consistent steering/mouse behavior
+                # Only for Hold mode; Toggle mode naturally syncs via shared trigger
+                if getattr(CONFIG, 'gyro_activation_mode', 'Hold') == 'Hold':
+                    for c in self.controllers:
+                        c.gyro_mouse_enabled = shared_gyro
+            else:
+                # If not merged, ensure we don't use a stale shared steer value
+                controller._shared_steer_value = getattr(controller, '_own_steer_value', 0.0)
+                controller._shared_gyro_trigger = getattr(controller, '_own_gyro_trigger', False)
+                controller._shared_zr_pressed = getattr(controller, '_own_zr_pressed', False)
+                controller._shared_zl_pressed = getattr(controller, '_own_zl_pressed', False)
                 
             current_buttons = inputData.buttons 
             
@@ -329,8 +358,10 @@ class VirtualController:
             if controller.is_joycon_right():
                 if self.hold_mode == "Vertical":
                     # Vertical: R Joycon controls virtual right stick
-                    self.last_rx = float_to_byte(inputData.right_stick[0])
-                    self.last_ry = float_to_byte(-inputData.right_stick[1])
+                    self.last_rx = int(max(0, min(255, round(inputData.right_stick[0] * 127.5 + 128))))
+                    self.last_ry = int(max(0, min(255, round(-inputData.right_stick[1] * 127.5 + 128))))
+                    self.last_lx = 128
+                    self.last_ly = 128
                 else:
                     # Horizontal: R Joycon controls virtual left stick
                     self.last_lx = float_to_byte(inputData.right_stick[0])
@@ -379,6 +410,12 @@ class VirtualController:
                 self.last_ax = inputData.accelerometer[0]
                 self.last_ay = inputData.accelerometer[2]
                 self.last_az = -inputData.accelerometer[1]
+
+        # Override with steering if active
+        if getattr(CONFIG, "gyro_mode", "World") == "Roll" and controller.gyro_mouse_enabled:
+            # PS4 uses byte 0-255, 128 is center
+            steer = getattr(controller, '_shared_steer_value', controller._own_steer_value if hasattr(controller, '_own_steer_value') else 0.0)
+            self.last_lx = int(max(0, min(255, round(steer * 127.5 + 128))))
 
         report.bThumbLX = self.last_lx
         report.bThumbLY = self.last_ly
@@ -440,6 +477,8 @@ class VirtualController:
                         # Vertical: R Joycon controls virtual right stick
                         self.last_xb_rx = inputData.right_stick[0]
                         self.last_xb_ry = inputData.right_stick[1]
+                        self.last_xb_lx = 0.0
+                        self.last_xb_ly = 0.0
                     else:
                         # Horizontal: R Joycon controls virtual left stick
                         self.last_xb_lx = inputData.right_stick[0]
@@ -456,6 +495,10 @@ class VirtualController:
                 elif controller.is_joycon_right():
                     self.last_xb_rx = inputData.right_stick[0]
                     self.last_xb_ry = inputData.right_stick[1]
+
+            # Override with steering if active
+            if getattr(CONFIG, "gyro_mode", "World") == "Roll" and controller.gyro_mouse_enabled:
+                self.last_xb_lx = getattr(controller, '_shared_steer_value', controller._own_steer_value if hasattr(controller, '_own_steer_value') else 0.0)
 
             # Phase 3: Gyro/Accel (Mirrored from PS4)
             if self.hold_mode == "Horizontal" and not controller.is_pro_controller():
@@ -516,6 +559,16 @@ class VirtualController:
             if hasattr(c, 'start_calibration'):
                 c.start_calibration()
 
+    def start_mag_calibration(self):
+        for c in self.controllers:
+            if hasattr(c, 'start_mag_calibration'):
+                c.start_mag_calibration()
+
+    def stop_mag_calibration(self):
+        for c in self.controllers:
+            if hasattr(c, 'stop_mag_calibration'):
+                c.stop_mag_calibration()
+
     def _1000hz_loop(self):
         import time
         last_time = time.perf_counter()
@@ -530,7 +583,7 @@ class VirtualController:
             if dt > 0.05: dt = 0.015
             
             with self.state_lock:
-                if self.vg_controller is None:
+                if not hasattr(self, 'vg_controller') or self.vg_controller is None:
                     continue
                     
                 if self.mode == "PS4":
@@ -565,7 +618,6 @@ class VirtualController:
                 self.vg_controller.unregister_notification()
             except Exception:
                 pass
-            del self.vg_controller
             self.vg_controller = None
             
         disconnect_tasks = []
@@ -599,7 +651,6 @@ class VirtualController:
                 except Exception:
                     pass
                 
-                del self.vg_controller
                 self.vg_controller = None
                 
             return True 

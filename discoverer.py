@@ -94,7 +94,9 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
                 logger.info(VIRTUAL_CONTROLLERS)
             except Exception:
                 logger.exception(f"Unable to initialize device {device.address}")
-                connected_mac_addresses.remove(device.address)
+                if device.address in connected_mac_addresses:
+                    connected_mac_addresses.remove(device.address)
+                print("\nConnection failed. Please press a button on the controller or hold SYNC to re-pair.")
 
         async def callback(device: BLEDevice, advertising_data: AdvertisementData):
             if device.address in connected_mac_addresses:

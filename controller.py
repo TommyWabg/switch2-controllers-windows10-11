@@ -1,5 +1,5 @@
 import bleak
-from bleak import BleakScanner, BleakClient, BleakGATTCharacteristic
+from bleak import BleakScanner, BleakClient, BleakGATTCharacteristic, BleakError
 from bleak.backends.device import BLEDevice
 import asyncio
 import logging
@@ -10,15 +10,18 @@ from dataclasses import dataclass
 import ctypes
 import time
 import threading
+import math
 try:
     ctypes.windll.winmm.timeBeginPeriod(1)
 except Exception:
     pass
 from config import CONFIG, SWITCH_BUTTONS
 from utils import (
-    apply_calibration_to_axis, get_stick_xy, press_or_release_mouse_button, 
+    apply_calibration_to_axis, get_stick_xy, press_or_release_mouse_button,
     reverse_bits, signed_looping_difference_16bit, to_hex, decodeu, decodes, 
-    convert_mac_string_to_value
+    convert_mac_string_to_value, vector_normalize, vector_cross, vector_dot,
+    quaternion_multiply, quaternion_normalize, quaternion_rotate_vector,
+    quaternion_from_vectors
 )
 
 logging.basicConfig()
@@ -242,9 +245,25 @@ class Controller:
         # Set defaults, will load actual calibration offsets after connecting and getting device info
         self.gyro_bias = (0.0, 0.0, 0.0)
             
-        self.stick_r_bias = tuple(getattr(CONFIG, "stick_r_bias", [0.0, 0.0]))
         self.calibration_samples_gyro = []
         self.calibration_samples_stick = []
+        self.kp_scale_smoothed = 1.0
+        self.km_scale_smoothed = 1.0
+        self.hold_mode = "Vertical"
+        
+        # Sensor fusion state
+        self.orientation = None # (w, x, y, z)
+        self.last_fusion_time = 0
+        self.gyro_bias_integral = (0.0, 0.0, 0.0)
+        self.gyro_start_time = 0
+        self.gyro_active_side_prev = False
+        
+        self.is_mag_calibrating = False
+        self.mag_bias = (0.0, 0.0, 0.0)
+        self.mag_min = [32767, 32767, 32767]
+        self.mag_max = [-32768, -32768, -32768]
+        
+        self.q_world_offset = None 
         
     def __repr__(self):
         return f"{CONTROLER_NAMES[self.controller_info.product_id]} : {self.device.address}"
@@ -257,6 +276,28 @@ class Controller:
         
         logger.info(f"Calibration started for {self.device.address}. Please keep the controller stationary...")
     
+    def start_mag_calibration(self):
+        self.is_mag_calibrating = True
+        self.mag_min = [32767, 32767, 32767]
+        self.mag_max = [-32768, -32768, -32768]
+        logger.info(f"Magnetometer calibration started for {self.device.address}. Please rotate the controller in all directions...")
+
+    def stop_mag_calibration(self):
+        if not self.is_mag_calibrating: return
+        self.is_mag_calibrating = False
+        
+        # Calculate bias as the center of the min/max range
+        bx = (self.mag_min[0] + self.mag_max[0]) / 2.0
+        by = (self.mag_min[1] + self.mag_max[1]) / 2.0
+        bz = (self.mag_min[2] + self.mag_max[2]) / 2.0
+        self.mag_bias = (bx, by, bz)
+        
+        logger.info(f"Magnetometer calibration complete for {self.device.address}. Bias: ({bx:.1f}, {by:.1f}, {bz:.1f})")
+        
+        # Store in config
+        CONFIG.mag_calibration_data[self.device.address] = list(self.mag_bias)
+        CONFIG.save_config()
+    
     async def connect(self):
         if (self.client is not None):
             raise Exception("Already connected")
@@ -265,69 +306,93 @@ class Controller:
             if (self.disconnected_callback is not None):
                 asyncio.create_task(self.disconnected_callback(self))
         
-        self.client = BleakClient(self.device, disconnected_callback=disconnected_callback)
-        await self.client.connect(timeout=20.0)
-        
-        logger.info(f"Connected to {self.device.address}")
-        
-        import sys
-        if sys.platform == "win32":
-            try:
+        try:
+            self.client = BleakClient(self.device, disconnected_callback=disconnected_callback)
+            await self.client.connect(timeout=20.0)
+            
+            logger.info(f"Connected to {self.device.address}")
+            
+            import sys
+            if sys.platform == "win32":
+                wd_bluetooth = None
                 try:
                     import winrt.windows.devices.bluetooth as wd_bluetooth
                 except ImportError:
-                    import bleak_winrt.windows.devices.bluetooth as wd_bluetooth
-                    
-                if hasattr(wd_bluetooth, 'BluetoothLEPreferredConnectionParameters'):
-                    params = wd_bluetooth.BluetoothLEPreferredConnectionParameters.throughput_optimized
-                    device = getattr(self.client._backend, "_requester", None)
-                    if device:
-                        if hasattr(device, 'request_preferred_connection_parameters_async'):
-                            await device.request_preferred_connection_parameters_async(params)
-                        elif hasattr(device, 'request_preferred_connection_parameters'):
-                            device.request_preferred_connection_parameters(params)
-                        logger.info(f"ThroughputOptimized applied for {self.device.address}")
-                else:
-                    logger.info("ThroughputOptimized not available on this Windows version.")
-            except Exception as e:
-                logger.warning(f"Failed to apply ThroughputOptimized: {e}")
+                    try:
+                        import bleak_winrt.windows.devices.bluetooth as wd_bluetooth
+                    except ImportError:
+                        logger.info("Windows Bluetooth WinRT components not found. Skipping throughput optimization.")
 
-        await asyncio.sleep(1.0)
-        
-        self.response_future = None
-        def command_response_callback(sender: BleakGATTCharacteristic, data: bytearray):
-            if self.response_future:
-                self.response_future.set_result(data)
-        
-        for attempt in range(3):
-            try:
-                await self.client.start_notify(COMMAND_RESPONSE_UUID, command_response_callback)
-                break
-            except Exception as e:
-                if attempt == 2: raise
-                logger.warning(f"Notify failed, retry {attempt+1}: {e}")
-                await asyncio.sleep(1.0)
+                if wd_bluetooth:
+                    try:
+                        if hasattr(wd_bluetooth, 'BluetoothLEPreferredConnectionParameters'):
+                            params = wd_bluetooth.BluetoothLEPreferredConnectionParameters.throughput_optimized
+                            device = getattr(self.client._backend, "_requester", None)
+                            if device:
+                                if hasattr(device, 'request_preferred_connection_parameters_async'):
+                                    await device.request_preferred_connection_parameters_async(params)
+                                elif hasattr(device, 'request_preferred_connection_parameters'):
+                                    device.request_preferred_connection_parameters(params)
+                                logger.info(f"ThroughputOptimized applied for {self.device.address}")
+                        else:
+                            logger.info("ThroughputOptimized not available on this Windows version.")
+                    except Exception as e:
+                        logger.warning(f"Failed to apply ThroughputOptimized (non-fatal): {e}")
 
-        self.controller_info = await self.read_controller_info()
-        
-        # After getting controller info, prioritize loading specific calibration from MAC address
-        addr = self.device.address
-        if addr in CONFIG.calibration_data:
-            self.gyro_bias = tuple(CONFIG.calibration_data[addr])
-            logger.info(f"Loaded per-device calibration for {addr}")
-        elif self.is_joycon_left():
-            self.gyro_bias = tuple(getattr(CONFIG, "gyro_bias_l", [0.0, 0.0, 0.0]))
-        else:
-            self.gyro_bias = tuple(getattr(CONFIG, "gyro_bias_r", [0.0, 0.0, 0.0]))
-        self.stick_calibration, self.second_stick_calibration = await self.read_calibration_data()
+            # Allow the connection to stabilize
+            await asyncio.sleep(2.0)
+            
+            # Explicit check before starting notification
+            if not self.client.is_connected:
+                logger.error(f"Device {self.device.address} disconnected before notify")
+                raise BleakError("Disconnected during setup")
 
-        await self.enable_input_notify_callback()
-        
-        await self.enableFeatures(FEATURE_MOTION | FEATURE_MOUSE)
+            self.response_future = None
+            def command_response_callback(sender: BleakGATTCharacteristic, data: bytearray):
+                if self.response_future:
+                    self.response_future.set_result(data)
+            
+            logger.info(f"Starting command response notification for {self.device.address}...")
+            for attempt in range(3):
+                if not self.client.is_connected:
+                    raise BleakError("Connection lost during notify retry")
+                try:
+                    await self.client.start_notify(COMMAND_RESPONSE_UUID, command_response_callback)
+                    break
+                except Exception as e:
+                    if attempt == 2: raise
+                    logger.warning(f"Notify failed, retry {attempt+1}: {e}")
+                    await asyncio.sleep(2.0)
 
-        self.interp_running = True
-        self.interp_thread = threading.Thread(target=self._interpolation_thread_loop, daemon=True)
-        self.interp_thread.start()
+            self.controller_info = await self.read_controller_info()
+            
+            # After getting controller info, prioritize loading specific calibration from MAC address
+            addr = self.device.address
+            if addr in CONFIG.calibration_data:
+                self.gyro_bias = tuple(CONFIG.calibration_data[addr])
+                logger.info(f"Loaded per-device calibration for {addr}")
+            elif self.is_joycon_left():
+                self.gyro_bias = tuple(getattr(CONFIG, "gyro_bias_l", [0.0, 0.0, 0.0]))
+            else:
+                self.gyro_bias = tuple(getattr(CONFIG, "gyro_bias_r", [0.0, 0.0, 0.0]))
+                
+            mag_cal_data = getattr(CONFIG, "mag_calibration_data", {}) or {}
+            if addr in mag_cal_data:
+                self.mag_bias = tuple(mag_cal_data[addr])
+                logger.info(f"Loaded per-device mag calibration for {addr}")
+                
+            self.stick_calibration, self.second_stick_calibration = await self.read_calibration_data()
+
+            await self.enable_input_notify_callback()
+            
+            await self.enableFeatures(FEATURE_MOTION | FEATURE_MOUSE | FEATURE_MAGNOMETER)
+
+            self.interp_running = True
+            self.interp_thread = threading.Thread(target=self._interpolation_thread_loop, daemon=True)
+            self.interp_thread.start()
+        except Exception:
+            await self.disconnect()
+            raise
 
         logger.info(f"Successfully initialized {self.device.address} ({self.controller_info.product_id:04x}) : {self.controller_info}")
         try:
@@ -539,6 +604,93 @@ class Controller:
 
     def set_input_report_callback(self, callback):
         self.input_report_callback = callback
+
+    def _reset_orientation_from_accel(self, ax, ay, az, mx=None, my=None, mz=None):
+        local_accel = (ax, ay, az)
+        world_up = (0, 0, 1)
+        self.orientation = quaternion_from_vectors(local_accel, world_up)
+        self.last_fusion_time = time.perf_counter()
+
+    def _mahony_update(self, gx, gy, gz, ax, ay, az, mx, my, mz, dt):
+        if self.orientation is None:
+            self._reset_orientation_from_accel(ax, ay, az, mx, my, mz)
+            return
+
+        current_mode = getattr(CONFIG, "gyro_mode", "World")
+        kp_base = getattr(CONFIG, "gyro_kp", 120.0) 
+        ki_base = 30.0 # Boosted for faster recovery from long-term drift
+        # Only use magnetometer correction in 9-axis (World) mode
+        km_base = 200.0 if current_mode == "World" else 0.0
+        
+        # 1. Calculate world-space directional acceleration
+        raw_mag = math.sqrt(ax*ax + ay*ay + az*az)
+        G_REF = 16384.0
+        accel_err_total = abs(raw_mag - G_REF)
+        gyro_mag = math.sqrt(gx**2 + gy**2 + gz**2)
+        
+        q = self.orientation
+        raw_world = quaternion_rotate_vector(q, (ax, ay, az))
+        h_shake = math.sqrt(raw_world[0]**2 + raw_world[1]**2)
+        v_shake_err = abs(raw_world[2] - G_REF)
+        
+        # 2. Ultimate Hybrid Order Directional Tapering
+        # G-Consistency: Trust base for overall sensor health
+        g_consistency = 1.0 / (1.0 + (accel_err_total / 4000.0)**2)
+
+        # kp (Pitch/Roll) - The Shield (Strict 1000 threshold for H-move)
+        kp_scale = 1.0 / (1.0 + (h_shake / 1000.0)**4 + (v_shake_err / 8000.0)**2 + (gyro_mag / 4000.0)**4)
+        kp = kp_base * kp_scale * g_consistency
+        
+        # km (Yaw) - The Magnet
+        km_scale = 1.0 / (1.0 + (h_shake / 8000.0)**2 + (v_shake_err / 8000.0)**2 + (gyro_mag / 10000.0)**2)
+        km = km_base * km_scale * g_consistency
+        
+        # 3. Accelerometer correction calculation
+        q_inv = (q[0], -q[1], -q[2], -q[3])
+        
+        error_accel = (0, 0, 0)
+        if kp > 0.01:
+            v_pred = quaternion_rotate_vector(q_inv, (0, 0, 1))
+            v_meas = vector_normalize((ax, ay, az))
+            error_accel = vector_cross(v_meas, v_pred)
+
+        # 4. Update bias integral (Strictly masked by kp_scale to prevent pollution)
+        if accel_err_total < 800 and gyro_mag < 200:
+            # Only learn bias when the current orientation reference is highly trusted
+            trust_factor = kp_scale 
+            self.gyro_bias_integral = (
+                self.gyro_bias_integral[0] + error_accel[0] * ki_base * dt * trust_factor,
+                self.gyro_bias_integral[1] + error_accel[1] * ki_base * dt * trust_factor,
+                self.gyro_bias_integral[2] + error_accel[2] * ki_base * dt * trust_factor
+            )
+
+        # 5. Apply Gyro and Accel correction to orientation
+        raw_to_rad = math.radians(1.0 / 16.4) 
+        gx_rad = (gx * raw_to_rad) + (kp * error_accel[0]) + self.gyro_bias_integral[0]
+        gy_rad = (gy * raw_to_rad) + (kp * error_accel[1]) + self.gyro_bias_integral[1]
+        gz_rad = (gz * raw_to_rad) + (kp * error_accel[2]) + self.gyro_bias_integral[2]
+
+        omega = (0, gx_rad, gy_rad, gz_rad)
+        q_dot = quaternion_multiply(self.orientation, omega)
+        
+        new_q = (
+            self.orientation[0] + 0.5 * q_dot[0] * dt,
+            self.orientation[1] + 0.5 * q_dot[1] * dt,
+            self.orientation[2] + 0.5 * q_dot[2] * dt,
+            self.orientation[3] + 0.5 * q_dot[3] * dt
+        )
+        q = quaternion_normalize(new_q)
+
+        # 6. Heading correction (Magnetometer nudge)
+        if km > 0.01 and (mx != 0 or my != 0 or mz != 0):
+            m_local = (mx, my, mz)
+            h = quaternion_rotate_vector(q, m_local)
+            heading_error = math.atan2(h[0], h[1]) 
+            correction_angle = -heading_error * km * dt
+            q_corr = (math.cos(correction_angle/2), 0, 0, math.sin(correction_angle/2))
+            q = quaternion_multiply(q_corr, q)
+
+        self.orientation = q
         
     def simulate_mouse(self, inputData: ControllerInputData):
         mouse_config = CONFIG.mouse_config
@@ -633,6 +785,21 @@ class Controller:
                         CONFIG.gyro_bias_r = list(self.gyro_bias)
                     CONFIG.save_config()
 
+        if getattr(self, 'is_mag_calibrating', False):
+            mx, my, mz = inputData.magnometer
+            self.mag_min[0] = min(self.mag_min[0], mx)
+            self.mag_min[1] = min(self.mag_min[1], my)
+            self.mag_min[2] = min(self.mag_min[2], mz)
+            self.mag_max[0] = max(self.mag_max[0], mx)
+            self.mag_max[1] = max(self.mag_max[1], my)
+            self.mag_max[2] = max(self.mag_max[2], mz)
+            # Suppress all output during mag calibration
+            inputData.left_stick = (0.0, 0.0)
+            inputData.right_stick = (0.0, 0.0)
+            inputData.gyroscope = (0.0, 0.0, 0.0)
+            inputData.accelerometer = (0.0, 0.0, 0.0)
+            return
+
         bias_threshold = 5  
         bx, by, bz = self.gyro_bias
         # Ignore if bias is extremely small
@@ -645,7 +812,7 @@ class Controller:
         gyro_y = raw_gy - by
         gyro_z = raw_gz - bz
 
-        soft_dz = 8.0  
+        soft_dz = 5.0  
         def apply_soft_deadzone(val, dz):
             if abs(val) < dz: return 0.0
             return (val - dz) if val > 0 else (val + dz)
@@ -659,106 +826,209 @@ class Controller:
         rx, ry = inputData.right_stick
 
         if activation_mode == "Hold":
+            if trigger_pressed and not getattr(self, 'gr_was_pressed', False):
+                # Reset orientation on activation to prevent jumps
+                self.orientation = None
+                self.gyro_bias_integral = (0.0, 0.0, 0.0)
+                self.gyro_start_time = time.perf_counter()
             self.gyro_mouse_enabled = trigger_pressed
         else:
             if trigger_pressed and not self.gr_was_pressed:
                 self.gyro_mouse_enabled = not self.gyro_mouse_enabled
+                if self.gyro_mouse_enabled:
+                    # Reset orientation on activation to prevent jumps
+                    self.orientation = None
+                    self.gyro_bias_integral = (0.0, 0.0, 0.0)
+                    self.gyro_start_time = time.perf_counter()
+                    self.q_world_offset = None 
                 
         self.gr_was_pressed = trigger_pressed
 
         if self.gyro_mouse_enabled:
-            if self.is_joycon_left():
-                rx, ry = inputData.left_stick
-                inputData.left_stick = (0, 0)
+            if self.is_pro_controller():
+                rx, ry = inputData.right_stick
+            elif self.is_joycon():
+                rx, ry = getattr(self, '_shared_right_stick', inputData.right_stick)
             else:
                 rx, ry = inputData.right_stick
-                inputData.right_stick = (0, 0)
             
             target_vx = 0.0
             target_vy = 0.0
             
+            now = time.perf_counter()
+            current_mode = getattr(CONFIG, "gyro_mode", "World")
+
+            # Hybrid Mouse Button Mapping (Only if NOT in Steering/Roll mode)
+            if current_mode != "Roll":
+                is_merged = getattr(self, "is_merged", False)
+                is_pro = self.is_pro_controller()
+                
+                if is_pro or is_merged:
+                    # Dual / Pro Mode: ZR is Left, ZL is Right
+                    current_l_click = zr_pressed
+                    current_r_click = zl_pressed
+                else:
+                    # Split Mode (Single Joycon behavior)
+                    if self.is_joycon_right():
+                        current_l_click = bool(inputData.buttons & SWITCH_BUTTONS.get("ZR", 0))
+                        current_r_click = bool(inputData.buttons & SWITCH_BUTTONS.get("R", 0))
+                    else:
+                        current_l_click = bool(inputData.buttons & SWITCH_BUTTONS.get("ZL", 0))
+                        current_r_click = bool(inputData.buttons & SWITCH_BUTTONS.get("L", 0))
+
+                # Detect button press and release for clicks
+                prev_l_click = getattr(self, 'prev_l_click', False)
+                prev_r_click = getattr(self, 'prev_r_click', False)
+
+                # Inject mouse clicks immediately
+                if current_l_click and not prev_l_click: win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                elif not current_l_click and prev_l_click: win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                
+                if current_r_click and not prev_r_click: win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+                elif not current_r_click and prev_r_click: win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+
+                self.prev_l_click = current_l_click
+                self.prev_r_click = current_r_click
+
+            # Suppress movement ONLY during gyro startup (Auto-Leveling period)
+            if now - self.gyro_start_time < 0.05:
+                self.gyro_target_vx = 0.0
+                self.gyro_target_vy = 0.0
+                return
+            
             gyro_x, gyro_y, gyro_z = inputData.gyroscope
             gyro_deadzone = 0.2 
             
-            current_mode = getattr(CONFIG, "gyro_mode", "Yaw")
-
-            if current_mode == "Roll":
+            if current_mode in ["World", "Yaw"]:
+                # Perform sensor fusion
+                if self.last_fusion_time == 0: dt = 0.015
+                else: dt = now - self.last_fusion_time
+                self.last_fusion_time = now
+                
+                ax, ay, az = inputData.accelerometer
+                mx, my, mz = inputData.magnometer
+                # Apply mag bias
+                mx -= self.mag_bias[0]
+                my -= self.mag_bias[1]
+                mz -= self.mag_bias[2]
+                
+                self._mahony_update(gyro_x, gyro_y, gyro_z, ax, ay, az, mx, my, mz, dt)
+                
+                # Transform local gyro to world space
+                # q rotates local to world
+                g_local = (gyro_x, gyro_y, gyro_z)
+                
+                # effective orientation logic:
+                # We want Pitch/Roll to remain absolute (relative to gravity), 
+                # but Yaw to be relative to activation.
+                if self.q_world_offset is None:
+                    q_abs = self.orientation
+                    # Forward in world space right now
+                    f_world = quaternion_rotate_vector(q_abs, (0, 1, 0)) # Assuming Y is forward locally
+                    # Angle to world Y (0, 1, 0) in XY plane
+                    yaw_angle = math.atan2(f_world[0], f_world[1])
+                    self.q_world_offset = -yaw_angle
+                
+                # 1. Calculate absolute world-space gyro
+                g_world_abs = quaternion_rotate_vector(self.orientation, g_local)
+                
+                # 2. Determine current pointing direction in world space
+                # Forward axis depends on how the controller is held
+                if self.is_pro_controller() or self.hold_mode == "Vertical":
+                    f_local = (0, 1, 0) # Top of controller is Forward
+                else:
+                    f_local = (1, 0, 0) # Side of Joycon is Forward in H-mode
+                
+                f_world = quaternion_rotate_vector(self.orientation, f_local)
+                
+                # 3. Calculate a horizontal "Right" axis perpendicular to pointing
+                # This is the axis around which "Pitching" (Up/Down) occurs
+                fh_x, fh_y = f_world[0], f_world[1]
+                fh_mag = math.sqrt(fh_x**2 + fh_y**2)
+                if fh_mag < 0.01:
+                    r_h = (1, 0, 0) # Fallback if pointing vertical
+                else:
+                    # Right = Forward_h x Up = (fh_y/mag, -fh_x/mag, 0)
+                    r_h = (fh_y / fh_mag, -fh_x / fh_mag, 0)
+                
+                # 4. Extract decoupled movements
+                # Horizontal: Rotation around World Z (Yaw)
+                eff_h = -g_world_abs[2]
+                
+                # Vertical: Rotation around the dynamic Right axis (Pitch)
+                # This mathematically eliminates the "slope effect".
+                eff_v = g_world_abs[0] * r_h[0] + g_world_abs[1] * r_h[1]
+                
+                # Apply soft deadzone (consistent with FPS mode)
+                soft_dz = 5.0
+                eff_h_final = 0
+                if eff_h > soft_dz: eff_h_final = eff_h - soft_dz
+                elif eff_h < -soft_dz: eff_h_final = eff_h + soft_dz
+                
+                eff_v_final = 0
+                if eff_v > soft_dz: eff_v_final = eff_v - soft_dz
+                elif eff_v < -soft_dz: eff_v_final = eff_v + soft_dz
+                
+                sensitivity = getattr(CONFIG, "gyro_sensitivity", 0.3)
+                accel_factor = 0.002
+                
+                # Determine vertical sign (invert for Right Joycon in H-mode if needed)
+                v_sign = -1.0
+                if self.is_joycon_right() and self.hold_mode == "Horizontal":
+                    v_sign = 1.0
+                
+                target_vx += eff_h_final * sensitivity * accel_factor
+                target_vy += eff_v_final * v_sign * sensitivity * accel_factor 
+            elif current_mode == "Roll":
                 ax, ay, az = inputData.accelerometer
                 
-                tilt_normalized = ax / 4000.0  
-                
-                sensitivity = getattr(CONFIG, "gyro_sensitivity", 4.0)
-                steer_value = tilt_normalized * (sensitivity * -2)
-                
-                steer_value = max(-1.0, min(1.0, steer_value))
-                
-                inputData.left_stick = (steer_value, inputData.left_stick[1])
-
-            else:
-                if abs(gyro_x) > gyro_deadzone or abs(gyro_z) > gyro_deadzone or abs(gyro_y) > gyro_deadzone:
-                    sensitivity = getattr(CONFIG, "gyro_sensitivity", 0.3)
-                    horizontal_val = -gyro_z
-                    
-                    eff_h = 0
-                    if horizontal_val > gyro_deadzone: eff_h = horizontal_val - gyro_deadzone
-                    elif horizontal_val < -gyro_deadzone: eff_h = horizontal_val + gyro_deadzone
-                        
-                    hold_mode = getattr(self, "hold_mode", "Horizontal")
-                    if self.is_pro_controller():
-                        vertical_val = gyro_x
-                    elif hold_mode == "Vertical":
-                        vertical_val = gyro_x
-                    elif self.is_joycon_left():
-                        vertical_val = -gyro_y  # Left Joycon horizontal Y axis is reversed
+                # Selection of the correct tilt axis based on orientation
+                is_horizontal = (getattr(self, "hold_mode", "Horizontal") == "Horizontal")
+                if is_horizontal:
+                    # In H-mode, tilt is measured on the Y axis
+                    # Correcting signs: CCW tilt should be Left (Negative Virtual X)
+                    if self.is_joycon_right():
+                        tilt_value = ay # Right Joycon CCW -> Y points Down -> ay negative. So Positive steer? No.
                     else:
-                        vertical_val = gyro_y
-
-                    eff_v = 0
-                    if vertical_val > gyro_deadzone: eff_v = vertical_val - gyro_deadzone
-                    elif vertical_val < -gyro_deadzone: eff_v = vertical_val + gyro_deadzone
-                    
-                    accel_factor = 0.002 
-                    
-                    target_vx += eff_h * sensitivity * accel_factor
-                    target_vy += eff_v * -sensitivity * accel_factor
-
-            stick_deadzone = 0.05 
-            stick_sens = getattr(CONFIG, "stick_mouse_sensitivity", 20.0) * 0.66
-            
-            import math
-            stick_magnitude = math.sqrt(rx**2 + ry**2)
-            
-            if stick_magnitude > stick_deadzone:
-                normalized_mag = (stick_magnitude - stick_deadzone) / (1.0 - stick_deadzone)
+                        tilt_value = -ay # Left Joycon CCW -> Y points Up -> ay positive. -ay negative.
+                else:
+                    # In V-mode or Pro Controller, tilt is on the X axis
+                    tilt_value = ax
                 
-                normalized_rx = (rx / stick_magnitude) * normalized_mag
-                normalized_ry = (ry / stick_magnitude) * normalized_mag
+                tilt_normalized = tilt_value / 4000.0  
+                sensitivity = getattr(CONFIG, "gyro_sensitivity", 4.0)
+                # Sensitivity * 1.0 (Inverted sign based on user feedback)
+                steer_value = max(-1.0, min(1.0, -tilt_normalized * sensitivity))
                 
-                target_vx += normalized_rx * stick_sens
-                target_vy += normalized_ry * -stick_sens
+                # Store for virtual controller to apply to correct virtual axis
+                self._own_steer_value = steer_value
+
+
+            # Analog Stick Mouse Movement (Stick Assist) - Only if NOT in Steering mode
+            if current_mode != "Roll":
+                stick_deadzone = 0.05 
+                stick_sens = getattr(CONFIG, "stick_mouse_sensitivity", 20.0) * 0.66
+                
+                stick_magnitude = math.sqrt(rx**2 + ry**2)
+                
+                if stick_magnitude > stick_deadzone:
+                    normalized_mag = (stick_magnitude - stick_deadzone) / (1.0 - stick_deadzone)
+                    normalized_rx = (rx / stick_magnitude) * normalized_mag
+                    normalized_ry = (ry / stick_magnitude) * normalized_mag
+                    
+                    target_vx += normalized_rx * stick_sens
+                    target_vy += normalized_ry * -stick_sens
 
             self.gyro_target_vx = target_vx
             self.gyro_target_vy = target_vy
 
-            # Gyro Mouse Clicks (Hardcoded to ZR/ZL as requested)
-            current_zr = zr_pressed
-            current_zl = zl_pressed
-
-            if current_zr and not self.prev_zr: win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            elif not current_zr and self.prev_zr: win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-
-            if current_zl and not self.prev_zl: win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
-            elif not current_zl and self.prev_zl: win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
-
-            self.prev_zr = current_zr
-            self.prev_zl = current_zl
-
         else:
             self.gyro_target_vx = 0.0
             self.gyro_target_vy = 0.0
-            if getattr(self, 'prev_zr', False): win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            if getattr(self, 'prev_zl', False): win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
-            self.prev_zr = self.prev_zl = False
+            self._own_steer_value = 0.0
+            if getattr(self, 'prev_l_click', False): win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            if getattr(self, 'prev_r_click', False): win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+            self.prev_l_click = self.prev_r_click = False
             self.gyro_residual_x = self.gyro_residual_y = 0.0
             self.current_vx = self.current_vy = 0.0
             self.interp_residual_x = self.interp_residual_y = 0.0

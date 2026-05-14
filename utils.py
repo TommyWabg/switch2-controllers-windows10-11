@@ -1,5 +1,5 @@
 import win32api
-
+import math
 from config import CONFIG
 
 def to_hex(buffer):
@@ -47,3 +47,56 @@ def reverse_bits(n: int, no_of_bits: int):
         result |= n & 1
         n >>= 1
     return result
+
+def vector_normalize(v):
+    mag = math.sqrt(sum(x*x for x in v))
+    if mag == 0: return (0, 0, 0)
+    return tuple(x/mag for x in v)
+
+def vector_cross(a, b):
+    return (
+        a[1]*b[2] - a[2]*b[1],
+        a[2]*b[0] - a[0]*b[2],
+        a[0]*b[1] - a[1]*b[0]
+    )
+
+def vector_dot(a, b):
+    return sum(x*y for x, y in zip(a, b))
+
+def quaternion_multiply(q, p):
+    w1, x1, y1, z1 = q
+    w2, x2, y2, z2 = p
+    return (
+        w1*w2 - x1*x2 - y1*y2 - z1*z2,
+        w1*x2 + x1*w2 + y1*z2 - z1*y2,
+        w1*y2 - x1*z2 + y1*w2 + z1*x2,
+        w1*z2 + x1*y2 - y1*x2 + z1*w2
+    )
+
+def quaternion_normalize(q):
+    mag = math.sqrt(sum(x*x for x in q))
+    if mag == 0: return (1, 0, 0, 0)
+    return tuple(x/mag for x in q)
+
+def quaternion_rotate_vector(q, v):
+    qv = (0, v[0], v[1], v[2])
+    q_inv = (q[0], -q[1], -q[2], -q[3])
+    res = quaternion_multiply(quaternion_multiply(q, qv), q_inv)
+    return (res[1], res[2], res[3])
+
+def quaternion_from_vectors(v_from, v_to):
+    v_from = vector_normalize(v_from)
+    v_to = vector_normalize(v_to)
+    dot = vector_dot(v_from, v_to)
+    if dot < -0.999999:
+        axis = vector_cross((1, 0, 0), v_from)
+        if math.sqrt(sum(x*x for x in axis)) < 0.000001:
+            axis = vector_cross((0, 1, 0), v_from)
+        return quaternion_normalize((0, axis[0], axis[1], axis[2]))
+    elif dot > 0.999999:
+        return (1, 0, 0, 0)
+    
+    s = math.sqrt((1 + dot) * 2)
+    inv_s = 1 / s
+    cross = vector_cross(v_from, v_to)
+    return quaternion_normalize((s * 0.5, cross[0] * inv_s, cross[1] * inv_s, cross[2] * inv_s))

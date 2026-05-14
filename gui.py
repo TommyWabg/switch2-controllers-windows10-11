@@ -1,4 +1,5 @@
 import queue
+import webbrowser
 import threading
 import tkinter as tk
 from tkinter import ttk
@@ -32,16 +33,18 @@ class ToggleSwitch(tk.Frame):
         self.labels = labels  
         self.values = values  
         self.command = command
+        self.buttons = []
         
-        self.btn_left = tk.Button(self, text=labels[0], width=8, font=("Arial", 12, "bold"),
-                                  command=lambda: self._on_click(0))
-        self.btn_right = tk.Button(self, text=labels[1], width=8, font=("Arial", 12, "bold"),
-                                   command=lambda: self._on_click(1))
+        for i, label in enumerate(labels):
+            btn = tk.Button(self, text=label, width=8, font=("Arial", 12, "bold"),
+                            command=lambda idx=i: self._on_click(idx))
+            btn.pack(side=tk.LEFT)
+            self.buttons.append(btn)
         
-        self.btn_left.pack(side=tk.LEFT)
-        self.btn_right.pack(side=tk.LEFT)
-        
-        self.current_index = 1 if initial_value == values[1] else 0
+        try:
+            self.current_index = values.index(initial_value)
+        except ValueError:
+            self.current_index = 0
         self._update_ui()
 
     def _on_click(self, index):
@@ -54,16 +57,18 @@ class ToggleSwitch(tk.Frame):
         active_style = {"bg": "#D32F2F", "fg": "white", "activebackground": "#ff3333"}
         inactive_style = {"bg": "#d0d0d0", "fg": "black", "activebackground": "#cccccc"}
         
-        if self.current_index == 0:
-            self.btn_left.config(**active_style)
-            self.btn_right.config(**inactive_style)
-        else:
-            self.btn_left.config(**inactive_style)
-            self.btn_right.config(**active_style)
+        for i, btn in enumerate(self.buttons):
+            if i == self.current_index:
+                btn.config(**active_style)
+            else:
+                btn.config(**inactive_style)
             
     def set_value(self, value):
-        self.current_index = 1 if value == self.values[1] else 0
-        self._update_ui()
+        try:
+            self.current_index = self.values.index(value)
+            self._update_ui()
+        except ValueError:
+            pass
 
 class PlayerInfoBlock:
     def __init__(self, parent, window):
@@ -303,8 +308,8 @@ class PlayerInfoBlock:
                 
                 if not getattr(self, 'mode_switch', None):
                     self.mode_switch = ToggleSwitch(self.battery_frame, ["V", "H"], ["Vertical", "Horizontal"], virtualController.hold_mode, self._on_hold_mode_toggled, block_color)
-                    self.mode_switch.btn_left.config(font=("Arial", 9, "bold"), width=2, padx=0, pady=0)
-                    self.mode_switch.btn_right.config(font=("Arial", 9, "bold"), width=2, padx=0, pady=0)
+                    for btn in self.mode_switch.buttons:
+                        btn.config(font=("Arial", 9, "bold"), width=2, padx=0, pady=0)
                 
                 self.mode_switch.place(relx=0.95, rely=0.5, anchor=tk.E)
                 self.mode_switch.set_value(virtualController.hold_mode)
@@ -352,7 +357,7 @@ class ControllerWindow:
         self.root.title("Switch2 Controllers")
         
         self.root.geometry("1000x580+50+50") 
-        self.root.minsize(1000, 690)
+        self.root.minsize(1060, 690)
         self.root.config(bg=background_color, padx=10, pady=10)
         self.font = tkFont.Font(family="Arial", size=16, weight="bold")
         self.pairing_hint_image = tk.PhotoImage(file=get_resource("images/pairing_hint.png"))
@@ -368,8 +373,8 @@ class ControllerWindow:
         tk.Label(self.gyro_frame, text="Mode:", bg=background_color, font=("Arial", 12, "bold")).grid(row=0, column=0, padx=5, sticky="e")
         self.gyro_mode_switch = ToggleSwitch(
             self.gyro_frame, 
-            labels=["FPS", "Steering"], 
-            values=["Yaw", "Roll"], 
+            labels=["9-Axis", "6-Axis", "Steering"], 
+            values=["World", "Yaw", "Roll"], 
             initial_value=CONFIG.gyro_mode, 
             command=self.update_mode_setting, 
             bg_color=background_color
@@ -381,7 +386,28 @@ class ControllerWindow:
         self.sens_scale.set(CONFIG.gyro_sensitivity)
         self.sens_scale.grid(row=0, column=4)
         
-        tk.Label(self.gyro_frame, text="Keep controller stationary before calibrating.", bg=background_color, font=("Arial", 12, "bold")).grid(row=0, column=5, columnspan=2, padx=(20, 5), sticky="w")
+        self.calibrate_btn = tk.Button(self.gyro_frame, text="Calibrate Gyro", command=self.on_calibrate_clicked, bg="#e0e0e0", font=("Arial", 12, "bold"))
+        self.calibrate_btn.grid(row=0, column=5, padx=(20, 5), sticky="ew")
+        tk.Label(self.gyro_frame, text="Keep controller stationary\nbefore calibrating.", bg=background_color, font=("Arial", 12, "bold"), justify=tk.LEFT).grid(row=0, column=6, padx=5, sticky="w")
+        
+        self.mag_calibrate_btn = tk.Button(self.gyro_frame, text="Calibrate Mag", command=self.on_mag_calibrate_clicked, bg="#e0e0e0", font=("Arial", 12, "bold"))
+        self.mag_calibrate_btn.grid(row=1, column=5, padx=(20, 5), pady=(10, 0), sticky="ew")
+        
+        # Sub-frame to contain mixed-style text with original tight line spacing
+        mag_hint_frame = tk.Frame(self.gyro_frame, bg=background_color)
+        mag_hint_frame.grid(row=1, column=6, padx=5, pady=(10, 0), sticky="w")
+        
+        # Line 1: Combined normal + link
+        line1_frame = tk.Frame(mag_hint_frame, bg=background_color)
+        line1_frame.pack(side=tk.TOP, anchor="w")
+        
+        tk.Label(line1_frame, text="Move controller in a ", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT)
+        link_label = tk.Label(line1_frame, text="'figure 8'", bg=background_color, font=("Arial", 12, "bold", "underline"), fg="blue", cursor="hand2")
+        link_label.pack(side=tk.LEFT)
+        link_label.bind("<Button-1>", lambda e: webbrowser.open("https://youtu.be/J_cZnPcW-Yw?si=ID2vdzURiOph8x77&t=6"))
+        
+        # Line 2: Pattern instruction (Tight spacing)
+        tk.Label(mag_hint_frame, text="pattern during calibration.", bg=background_color, font=("Arial", 12, "bold")).pack(side=tk.TOP, anchor="w")
 
         tk.Label(self.gyro_frame, text="Activation:", bg=background_color, font=("Arial", 12, "bold")).grid(row=1, column=0, padx=5, pady=(10, 0), sticky="e")
         self.gyro_act_switch = ToggleSwitch(
@@ -397,10 +423,7 @@ class ControllerWindow:
         tk.Label(self.gyro_frame, text="Stick Assist:", bg=background_color, font=("Arial", 12, "bold")).grid(row=1, column=3, padx=(20, 5), pady=(10, 0), sticky="e")
         self.stick_scale = tk.Scale(self.gyro_frame, from_=0, to=10, resolution=0.2, orient=tk.HORIZONTAL, length=120, bg=background_color, font=("Arial", 12, "bold"), command=self.on_gyro_setting_changed)
         self.stick_scale.set(getattr(CONFIG, "stick_mouse_sensitivity", 5.0))
-        self.stick_scale.grid(row=1, column=4, columnspan=3, pady=(10, 0), sticky="w")
-        
-        self.calibrate_btn = tk.Button(self.gyro_frame, text="Calibrate Gyro", command=self.on_calibrate_clicked, bg="#e0e0e0", font=("Arial", 12, "bold"))
-        self.calibrate_btn.grid(row=1, column=5, columnspan=2, padx=(20, 5), pady=(10, 0), sticky="ew")
+        self.stick_scale.grid(row=1, column=4, columnspan=1, pady=(10, 0), sticky="w")
         
     def update_mode_setting(self, val):
         CONFIG.gyro_mode = val
@@ -479,6 +502,25 @@ class ControllerWindow:
         self.calibrate_btn.config(state=tk.DISABLED, text="Calibrating (2..)")
         self.root.after(1000, lambda: self.calibrate_btn.config(text="Calibrating (1..)"))
         self.root.after(2000, lambda: self.calibrate_btn.config(state=tk.NORMAL, text="Calibration Done"))
+
+    def on_mag_calibrate_clicked(self):
+        if not hasattr(self, 'current_controllers') or self.no_controllers:
+            return
+
+        if not getattr(self, 'is_mag_calibrating_ui', False):
+            # Start Calibration
+            self.is_mag_calibrating_ui = True
+            for vc in self.current_controllers:
+                if vc is not None:
+                    vc.start_mag_calibration()
+            self.mag_calibrate_btn.config(text="Stop Mag Calib", bg="#ff8c00")
+        else:
+            # Stop Calibration
+            self.is_mag_calibrating_ui = False
+            for vc in self.current_controllers:
+                if vc is not None:
+                    vc.stop_mag_calibration()
+            self.mag_calibrate_btn.config(text="Calibrate Mag", bg="#e0e0e0")
     
     def init_settings_panel(self):
         self.settings_frame = tk.Frame(self.root, bg=background_color)

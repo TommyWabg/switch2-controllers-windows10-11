@@ -174,9 +174,11 @@ class Config:
         self.c_mapping = config.get("c_mapping", "None")
         self.slr_mapping = config.get("slr_mapping", "Gyro")
         self.srl_mapping = config.get("srl_mapping", "None")
+        self.sll_mapping = config.get("sll_mapping", "None")
+        self.srr_mapping = config.get("srr_mapping", "None")
         self.abxy_mode = config.get("abxy_mode", "Xbox") 
         
-        self.gyro_mode = config.get("gyro_mode", "Yaw")
+        self.gyro_mode = config.get("gyro_mode", "World")
         self.gyro_sensitivity = float(config.get("gyro_sensitivity", 0.3))
         self.gyro_smoothing = 0.0 
         self.gyro_activation_mode = config.get("gyro_activation_mode", "Toggle")
@@ -187,7 +189,8 @@ class Config:
         self.stick_r_bias = config.get("stick_r_bias", [0.0, 0.0])
         
         # MAC address -> Calibration data mapping dictionary
-        self.calibration_data = config.get("calibration_data", {})
+        self.calibration_data = config.get("calibration_data", {}) or {}
+        self.mag_calibration_data = config.get("mag_calibration_data", {}) or {}
         
         self.simulation_mode = config.get("simulation_mode", "Xbox")
 
@@ -219,6 +222,7 @@ class Config:
             data['gyro_bias_r'] = self.gyro_bias_r
             data['stick_r_bias'] = self.stick_r_bias
             data['calibration_data'] = self.calibration_data
+            data['mag_calibration_data'] = self.mag_calibration_data
             
             if 'mouse' not in data:
                 data['mouse'] = {}
