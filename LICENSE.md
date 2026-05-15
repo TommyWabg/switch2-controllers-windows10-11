@@ -1,7 +1,9 @@
 MIT License
 
 Copyright (c) 2026 TommyWabg
+
 Portions Copyright (c) 2025 Nadeflore
+
 Portions Copyright (c) 2021 x-io Technologies
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
