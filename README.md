@@ -60,6 +60,7 @@ To achieve drift-free 9-axis tracking, follow these steps to calibrate the magne
 
 
 **This project is developed based on and has been extensively modified from [Nadeflore/switch2-controllers](https://github.com/Nadeflore/switch2-controllers). I would like to thank the original author for her foundational work.**
+
 ---
 *(Below is the original project description)*
 
