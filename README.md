@@ -4,7 +4,7 @@ This fork is heavily optimized for Windows 10/11 users, featuring a fully intera
 
 ## Key Features
 
-* **Windows 10 Native Compatibility:** Resolved the `AttributeError: property is not available...` crash. Runs flawlessly on Windows 10 (22H2 and above).
+* **Windows 10 Native Compatibility:** Resolved the `AttributeError: property is not available...` crash. Runs flawlessly on Windows 10 (22H2 and above). Windows 11 is still recommanded for 70Hz max bluetooth polling rate, while only 20Hz max on Windows 10 due to the lack of OS driver support for BLE protocol.
 * **Low Latency Bluetooth Mode:** The application now forces Windows Bluetooth LE into `ThroughputOptimized` mode upon connection. This drastically drops the connection interval, massively reducing native Bluetooth input delay across the board.
 * **Dynamic Emu Mode Toggle:** You can now instantly switch between Xbox 360 and PS4 (DualShock 4) emulation modes directly from the settings panel. This allows you to choose the best protocol for your specific game or platform without restarting the app.
 * **Native Motion Support (PS4 Mode):** Switching to PS4 mode enables native motion sensor reporting via the DS4 protocol. This provides enhanced compatibility for Steam Input and games that support native DualShock 4 gyro features.
@@ -24,7 +24,15 @@ This fork is heavily optimized for Windows 10/11 users, featuring a fully intera
 * **Interactive Controller Identification:** Added a dedicated **Vibrate** button for each player slot. This allows for instant physical feedback, helping you quickly identify which Joy-con belongs to which player in a multiplayer setup.
 * **Haptic & OS Integration:** Added rumble feedback (including a connection confirmation rumble) and mapped the Capture button to native Windows screenshots (`Win + PrtScn`).
 * **One-Click Disconnect:** Added a convenient 'X' button to the top right of each connected controller's UI block. You can now manually disconnect specific controllers directly from the interface without needing to power them off physically.
+* **Hide to system tray:** Added the ability to minimize the application to the Windows system tray.
 * **Standalone Executable (.exe):** Fully packed with all dependencies (including vgamepad DLLs). No Python installation required.
+
+## System Requirements
+
+* **Operating System:** Windows 10 (22H2 or above) or Windows 11.
+    * *Note:* **Windows 11 is highly recommended** for the best experience. It supports a maximum Bluetooth LE polling rate of **70Hz**, while Windows 10 is limited to **20Hz** due to the lack of OS driver support for the BLE protocol.
+* **Bluetooth Hardware:** Bluetooth 5.0 or above is required for stable connectivity and low-latency performance.
+* **Driver:** [Nefarius ViGEmBus driver](https://github.com/nefarius/ViGEmBus/releases) must be installed for virtual gamepad emulation.
 
 ## Quick Start
 
