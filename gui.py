@@ -1,4 +1,5 @@
 import queue
+import time
 import webbrowser
 import threading
 import tkinter as tk
@@ -14,11 +15,40 @@ from discoverer import start_discoverer, set_shutting_down
 from config import get_resource, CONFIG, BACK_BUTTON_OPTIONS
 from virtual_controller import VirtualController
 from discoverer import split_controller, merge_controllers, VIRTUAL_CONTROLLERS
+from utils import set_startup
 import pystray
 from pystray import MenuItem as item
 from PIL import Image
+import win32gui
+import win32con
 
 logger = logging.getLogger(__name__)
+
+class PowerListener:
+    def __init__(self, callback):
+        self.callback = callback
+        self.hwnd = None
+
+    def start(self):
+        def _listen():
+            wc = win32gui.WNDCLASS()
+            wc.lpfnWndProc = self.wndproc
+            wc.lpszClassName = "PowerListenerWindow"
+            hInstance = win32gui.GetModuleHandle(None)
+            wc.hInstance = hInstance
+            try:
+                class_atom = win32gui.RegisterClass(wc)
+                self.hwnd = win32gui.CreateWindow(class_atom, "PowerListener", 0, 0, 0, 0, 0, 0, 0, hInstance, None)
+                win32gui.PumpMessages()
+            except Exception as e:
+                logger.error(f"PowerListener failed: {e}")
+            
+        threading.Thread(target=_listen, daemon=True).start()
+
+    def wndproc(self, hwnd, msg, wparam, lparam):
+        if msg == win32con.WM_POWERBROADCAST:
+            self.callback(wparam)
+        return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
 
 controller_frame_size = 200
 battery_height = 40
@@ -335,11 +365,15 @@ class ControllerWindow:
         self.no_controllers = True
         self.message_queue = queue.Queue()
         self.quit_event = threading.Event()
+        self.discoverer_callback = None
+        self.power_listener = PowerListener(self.handle_power_event)
 
     def init_interface(self):
         try: ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('tommy.switch2.controllers.0.5.1')
         except: pass
         self.root = tk.Tk()
+        if CONFIG.start_minimized:
+            self.root.withdraw()
         try:
             photo = tk.PhotoImage(file=get_resource('images/icon.png'))
             self.root.wm_iconphoto(False, photo)
@@ -378,10 +412,11 @@ class ControllerWindow:
                         font=("Arial", 12, "bold"))
         style.map("TCombobox", 
                   fieldbackground=[('readonly', button_gray)],
+                  background=[('readonly', button_gray), ('active', button_gray), ('pressed', button_gray)],
                   foreground=[('readonly', 'white')],
-                  bordercolor=[('focus', button_gray)],
-                  lightcolor=[('focus', button_gray)],
-                  darkcolor=[('focus', button_gray)])
+                  bordercolor=[('readonly', button_gray)],
+                  lightcolor=[('readonly', button_gray)],
+                  darkcolor=[('readonly', button_gray)])
         
         self.root.option_add("*TCombobox*Listbox.background", button_gray)
         self.root.option_add("*TCombobox*Listbox.foreground", "white")
@@ -404,12 +439,36 @@ class ControllerWindow:
                   background=[('pressed', highlight_color), ('active', highlight_color)],
                   troughcolor=[('pressed', background_color), ('active', background_color)])
 
-        self.hide_btn = tk.Button(self.root, text="Hide to System Tray", bg=button_gray, fg=text_color, bd=0, relief=tk.FLAT, font=("Arial", 10, "bold"), command=self.hide_to_tray)
-        self.hide_btn.place(relx=1.0, rely=0.0, anchor=tk.NE)
         self.font = tkFont.Font(family="Arial", size=16, weight="bold")
         self.pairing_hint_image = tk.PhotoImage(file=get_resource("images/pairing_hint.png"))
+
         self.init_settings_panel()
         self.init_gyro_settings_panel()
+
+        # New centralized button row above Gyro Settings
+        self.top_btn_frame = tk.Frame(self.root, bg=background_color)
+        self.top_btn_frame.pack(side=tk.BOTTOM, pady=(0, 5))
+
+        # Startup Button
+        self.startup_frame = tk.Frame(self.top_btn_frame, bg=highlight_color if CONFIG.open_when_startup else button_gray)
+        self.startup_frame.pack(side=tk.LEFT, padx=5)
+        startup_text = f"Run At Startup: {'ON' if CONFIG.open_when_startup else 'OFF'}"
+        self.startup_btn = tk.Button(self.startup_frame, text=startup_text, bg=button_gray, fg=text_color, bd=0, relief=tk.FLAT, font=("Arial", 10, "bold"), command=lambda: self.update_startup_setting(not CONFIG.open_when_startup))
+        self.startup_btn.pack(padx=2, pady=2)
+
+        # Minimized Button
+        self.min_frame = tk.Frame(self.top_btn_frame, bg=highlight_color if CONFIG.start_minimized else button_gray)
+        self.min_frame.pack(side=tk.LEFT, padx=5)
+        minimized_text = f"Start Minimized: {'ON' if CONFIG.start_minimized else 'OFF'}"
+        self.minimized_btn = tk.Button(self.min_frame, text=minimized_text, bg=button_gray, fg=text_color, bd=0, relief=tk.FLAT, font=("Arial", 10, "bold"), command=lambda: self.update_minimized_setting(not CONFIG.start_minimized))
+        self.minimized_btn.pack(padx=2, pady=2)
+
+        # Hide Button
+        self.hide_frame = tk.Frame(self.top_btn_frame, bg=button_gray)
+        self.hide_frame.pack(side=tk.LEFT, padx=5)
+        self.hide_btn = tk.Button(self.hide_frame, text="Hide to System Tray", bg=button_gray, fg=text_color, bd=0, relief=tk.FLAT, font=("Arial", 10, "bold"), command=self.hide_to_tray)
+        self.hide_btn.pack(padx=2, pady=2)
+
         self.update([None])
 
     def init_gyro_settings_panel(self):
@@ -571,6 +630,23 @@ class ControllerWindow:
         CONFIG.abxy_mode = val
         self.on_setting_changed()
 
+    def update_startup_setting(self, val):
+        CONFIG.open_when_startup = val
+        set_startup(val)
+        CONFIG.save_config()
+        if hasattr(self, 'startup_btn'):
+            self.startup_btn.config(text=f"Run At Startup: {'ON' if val else 'OFF'}")
+        if hasattr(self, 'startup_frame'):
+            self.startup_frame.config(bg=highlight_color if val else button_gray)
+
+    def update_minimized_setting(self, val):
+        CONFIG.start_minimized = val
+        CONFIG.save_config()
+        if hasattr(self, 'minimized_btn'):
+            self.minimized_btn.config(text=f"Start Minimized: {'ON' if val else 'OFF'}")
+        if hasattr(self, 'min_frame'):
+            self.min_frame.config(bg=highlight_color if val else button_gray)
+
     def on_setting_changed(self, event=None):
         CONFIG.gl_mapping = self.gl_combo.get()
         CONFIG.gr_mapping = self.gr_combo.get()
@@ -583,10 +659,11 @@ class ControllerWindow:
             for k in ['gl_mapping','gr_mapping','c_mapping','slr_mapping','srl_mapping']: data[k] = getattr(CONFIG, k)
             with open(CONFIG.config_file_path, 'w', encoding='utf-8') as f: yaml.dump(data, f, default_flow_style=False)
         except Exception as e: logger.error(f"Failed to save settings: {e}")
+        self.root.focus_set()
 
     def update(self, controllers_info):
         if self.main_frame is None:
-            self.main_frame = tk.Frame(self.root, bg=background_color); self.main_frame.pack(pady=30, fill=tk.Y)
+            self.main_frame = tk.Frame(self.root, bg=background_color); self.main_frame.pack(pady=(10, 5), fill=tk.Y)
             self.players_info = None
         self.current_controllers = controllers_info
         any_connected = any(c is not None for c in controllers_info)
@@ -608,7 +685,6 @@ class ControllerWindow:
                 for w in self.main_frame.winfo_children(): w.destroy()
                 tk.Label(self.main_frame, text="Press button of a paired controller, or hold sync button to pair", font=self.font, bg=background_color, fg=text_color).pack()
                 tk.Label(self.main_frame, image=self.pairing_hint_image, bg=background_color).pack(pady=10)
-                tk.Button(self.main_frame, text="Hide to Tray", command=self.hide_to_tray, bg=button_gray, fg=text_color).pack(pady=10)
 
     def hide_to_tray(self):
         self.root.withdraw()
@@ -659,13 +735,35 @@ class ControllerWindow:
             finally: self.root.after(0, lambda: (self.root.destroy(), os._exit(0)))
         threading.Thread(target=cleanup, daemon=True).start()
 
+    def handle_power_event(self, wparam):
+        if wparam == win32con.PBT_APMSUSPEND:
+            logger.info("System Suspend detected. Disconnecting all controllers...")
+            self.quit_event.set()
+        elif wparam == win32con.PBT_APMRESUMESUSPEND:
+            logger.info("System Resume detected. Restarting discovery...")
+            # Wait a bit for the Bluetooth adapter to fully wake up
+            def restart():
+                time.sleep(3.0)
+                if self.discoverer_callback:
+                    self.quit_event.clear()
+                    t = threading.Thread(target=start_discoverer, args=(self.discoverer_callback, self.quit_event), daemon=True)
+                    t.start()
+            threading.Thread(target=restart, daemon=True).start()
+
     def start(self):
         self.is_quitting = False
         def callback(vcs):
             if not getattr(self, 'is_quitting', False):
                 self.message_queue.put(vcs); self.root.event_generate(CONTROLLER_UPDATED_EVENT)
+        self.discoverer_callback = callback
         self.root.bind(CONTROLLER_UPDATED_EVENT, lambda e: self.update(self.message_queue.get()))
         t = threading.Thread(target=start_discoverer, args=(callback, self.quit_event), daemon=True); t.start()
+        
+        self.power_listener.start()
+        
+        if CONFIG.start_minimized:
+            self.hide_to_tray()
+            
         self.root.protocol("WM_DELETE_WINDOW", self.on_quit); self.root.mainloop()
 
 if __name__ == "__main__":

@@ -123,8 +123,7 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
     finally:
         for vc in VIRTUAL_CONTROLLERS:
             if vc is not None:
-                for controller in vc.controllers:
-                    await controller.disconnect()
+                await vc.disconnect()
 
 def start_discoverer(update_controllers_threadsafe, quit_event):
     asyncio.run(run_discovery(update_controllers_threadsafe, quit_event))

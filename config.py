@@ -193,6 +193,8 @@ class Config:
         self.mag_calibration_data = config.get("mag_calibration_data", {}) or {}
         
         self.simulation_mode = config.get("simulation_mode", "Xbox")
+        self.open_when_startup = config.get("open_when_startup", False)
+        self.start_minimized = config.get("start_minimized", False)
 
         logger.info(f"Config successfully loaded from {self.config_file_path}")
         
@@ -206,6 +208,8 @@ class Config:
                     data = yaml.safe_load(f) or {}
             
             data['simulation_mode'] = self.simulation_mode
+            data['open_when_startup'] = self.open_when_startup
+            data['start_minimized'] = self.start_minimized
             data['abxy_mode'] = self.abxy_mode
             data['gl_mapping'] = self.gl_mapping
             data['gr_mapping'] = self.gr_mapping

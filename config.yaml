@@ -72,14 +72,40 @@ buttons:
     Y: Y
     ZR: RT
 c_mapping: None
+calibration_data:
+  E0:EF:BF:81:06:9F:
+  - 5.92
+  - -13.96
+  - -0.256
+  E0:EF:BF:EF:CC:BD:
+  - 2.576
+  - -11.808
+  - 9.624
+  E0:EF:BF:F0:0E:17:
+  - -2.2635658914728682
+  - 1.054263565891473
+  - 3.9224806201550386
 combine_joycons: true
 controller_mode: Xbox
 deadzone: 50
 gl_mapping: PSTPAD_L
 gr_mapping: PSTPAD_R
 gyro_activation_mode: Hold
+gyro_bias:
+- 5.689655172413793
+- -13.310344827586206
+- -0.4482758620689655
+gyro_bias_l:
+- -2.2635658914728682
+- 1.054263565891473
+- 3.9224806201550386
+gyro_bias_r:
+- 2.576
+- -11.808
+- 9.624
 gyro_mode: World
 gyro_sensitivity: 4.0
+mag_calibration_data: {}
 mouse:
   buttons:
     left_joycon:
@@ -93,9 +119,11 @@ mouse:
   enabled: true
   scroll_sensitivity: 2
   sensitivity: 5.0
+open_when_startup: false
 simulation_mode: PS4
-slr_mapping: Gyro
+slr_mapping: PSTPAD_R
 srl_mapping: PSTPAD_L
+start_minimized: false
 stick_mouse_sensitivity: 5.0
 stick_r_bias:
 - 0.0

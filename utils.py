@@ -1,4 +1,7 @@
 import win32api
+import winreg
+import sys
+import os
 import math
 from config import CONFIG
 
@@ -100,3 +103,29 @@ def quaternion_from_vectors(v_from, v_to):
     inv_s = 1 / s
     cross = vector_cross(v_from, v_to)
     return quaternion_normalize((s * 0.5, cross[0] * inv_s, cross[1] * inv_s, cross[2] * inv_s))
+
+def set_startup(enabled: bool):
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+    app_name = "Switch2Controllers"
+    
+    if hasattr(sys, 'frozen'):
+        # Executable path
+        app_path = sys.executable
+    else:
+        # Python script path
+        app_path = f'"{sys.executable}" "{os.path.abspath(sys.argv[0])}"'
+
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+        if enabled:
+            winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, app_path)
+        else:
+            try:
+                winreg.DeleteValue(key, app_name)
+            except FileNotFoundError:
+                pass
+        winreg.CloseKey(key)
+        return True
+    except Exception as e:
+        print(f"Error setting startup: {e}")
+        return False
