@@ -11,7 +11,7 @@ import asyncio
 import os
 import ctypes
 from controller import Controller
-from discoverer import start_discoverer, set_shutting_down
+from discoverer import start_discoverer, set_shutting_down, set_suspending, emergency_cleanup
 from config import get_resource, CONFIG, BACK_BUTTON_OPTIONS
 from virtual_controller import VirtualController
 from discoverer import split_controller, merge_controllers, VIRTUAL_CONTROLLERS
@@ -503,7 +503,7 @@ class ControllerWindow:
         tk.Label(l1, text="Move controller in a ", bg=background_color, fg=text_color, font=("Arial", 12, "bold")).pack(side=tk.LEFT)
         lnk = tk.Label(l1, text="'figure 8'", bg=background_color, fg=highlight_color, font=("Arial", 12, "bold", "underline"), cursor="hand2")
         lnk.pack(side=tk.LEFT)
-        lnk.bind("<Button-1>", lambda e: webbrowser.open("https://youtu.be/J_cZnPcW-Yw?si=ID2vdzURiOph8x77&t=6"))
+        lnk.bind("<Button-1>", lambda e: (logger.info(f"Opening YouTube link via webbrowser..."), webbrowser.open("https://youtu.be/J_cZnPcW-Yw?si=ID2vdzURiOph8x77&t=6")))
         
         tk.Label(mag_hint_frame, text="pattern during calibration.", bg=background_color, fg=text_color, font=("Arial", 12, "bold")).pack(side=tk.TOP, anchor="w")
 
@@ -666,7 +666,8 @@ class ControllerWindow:
             self.main_frame = tk.Frame(self.root, bg=background_color); self.main_frame.pack(pady=(10, 5), fill=tk.Y)
             self.players_info = None
         self.current_controllers = controllers_info
-        any_connected = any(c is not None for c in controllers_info)
+        # A slot is only "connected" if the VirtualController exists AND has physical controllers
+        any_connected = any(c is not None and len(getattr(c, 'controllers', [])) > 0 for c in controllers_info)
         self.no_controllers = not any_connected
         if any_connected:
             if self.players_info is None:
@@ -675,8 +676,10 @@ class ControllerWindow:
                 for p in self.players_info: p.main_frame.pack(padx=10, pady=10, side=tk.LEFT)
             for i, player_info in enumerate(self.players_info):
                 vc = controllers_info[i] if i < len(controllers_info) else None
-                if vc is not None: player_info.displayControllersInfo(vc)
-                else: player_info.clearControllerInfo()
+                if vc is not None and len(vc.controllers) > 0: 
+                    player_info.displayControllersInfo(vc)
+                else: 
+                    player_info.clearControllerInfo()
         else:
             if self.players_info is not None:
                 for p in self.players_info: p.main_frame.destroy()
@@ -736,18 +739,84 @@ class ControllerWindow:
         threading.Thread(target=cleanup, daemon=True).start()
 
     def handle_power_event(self, wparam):
+        current_time = time.strftime("%H:%M:%S")
         if wparam == win32con.PBT_APMSUSPEND:
-            logger.info("System Suspend detected. Disconnecting all controllers...")
+            logger.info(f"[{current_time}] System Suspend detected (PBT_APMSUSPEND). Starting cleanup...")
+            set_suspending(True)
+            
+            if hasattr(self, 'current_controllers'):
+                # Iterate and close each controller synchronously
+                for vc in self.current_controllers:
+                    if vc is not None:
+                        # 1. Stop the 1000Hz loop thread and reset inputs
+                        vc.running = False
+                        vc.reset_inputs()
+                        
+                        # 2. ALSO stop physical controller threads to prevent background work
+                        for c in vc.controllers:
+                            c.interp_running = False
+                            c.suspended = True 
+                            c._is_suspending = True 
+                        
+                        # 3. IMMEDIATELY and SYNCHRONOUSLY destroy the virtual device handle
+                        vc.force_close()
+            
+            # CRITICAL: Reset the ViGEm bus singleton to release the driver handle entirely
+            from virtual_controller import reset_vigem_bus
+            reset_vigem_bus()
+            
+            # Final pause to let any OS-level driver cleanup settle
+            time.sleep(1.0)
+            
             self.quit_event.set()
-        elif wparam == win32con.PBT_APMRESUMESUSPEND:
-            logger.info("System Resume detected. Restarting discovery...")
-            # Wait a bit for the Bluetooth adapter to fully wake up
+            self._is_restarting_discovery = False
+            logger.info(f"[{current_time}] Suspend preparation complete. quit_event set.")
+        
+        elif wparam in [win32con.PBT_APMRESUMESUSPEND, 0x0012]: # PBT_APMRESUMESUSPEND or PBT_APMRESUMEAUTOMATIC
+            event_name = "PBT_APMRESUMESUSPEND" if wparam == win32con.PBT_APMRESUMESUSPEND else "PBT_APMRESUMEAUTOMATIC"
+            logger.info(f"[{current_time}] System Resume detected ({event_name}).")
+            
+            # Reset suspension state immediately
+            set_suspending(False)
+            self.quit_event.clear()
+            
+            # CRITICAL: Force immediate cleanup of any potentially stale handles that survived
+            # This also re-initializes the ViGEm bus singleton via its internal call.
+            emergency_cleanup()
+            
+            # Force UI to clear old/stale controller displays immediately
+            self.root.after(0, lambda: self.update([]))
+            
+            logger.info(f"[{current_time}] quit_event cleared. UI cleared. Preparing to restart discovery...")
+            
+            if getattr(self, '_is_restarting_discovery', False):
+                logger.info("Restart already in progress. Skipping...")
+                return
+            self._is_restarting_discovery = True
+
             def restart():
-                time.sleep(3.0)
-                if self.discoverer_callback:
-                    self.quit_event.clear()
-                    t = threading.Thread(target=start_discoverer, args=(self.discoverer_callback, self.quit_event), daemon=True)
-                    t.start()
+                try:
+                    # Longer delay to ensure Bluetooth radio and driver handles are stable
+                    # 7 seconds is safer for some slower BT adapters on wake
+                    time.sleep(7.0)
+                    
+                    if not getattr(self, '_is_restarting_discovery', False): return
+                    
+                    # Double-check we didn't suspend again during the sleep
+                    from discoverer import _IS_SUSPENDING
+                    if _IS_SUSPENDING:
+                        logger.info("System is suspending again. Aborting restart.")
+                        self._is_restarting_discovery = False
+                        return
+                        
+                    logger.info("Restarting discovery loop...")
+                    from discoverer import start_discoverer
+                    start_discoverer(self.discoverer_callback, self.quit_event)
+                except Exception as e:
+                    logger.error(f"Restart failed: {e}")
+                finally:
+                    self._is_restarting_discovery = False
+
             threading.Thread(target=restart, daemon=True).start()
 
     def start(self):

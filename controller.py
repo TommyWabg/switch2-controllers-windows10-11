@@ -24,7 +24,10 @@ from utils import (
     quaternion_from_vectors
 )
 
-logging.basicConfig()
+logging.basicConfig(
+    format='%(asctime)s.%(msecs)03d %(levelname)s:%(name)s:%(message)s',
+    datefmt='%H:%M:%S'
+)
 logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -264,6 +267,19 @@ class Controller:
         self.mag_max = [-32768, -32768, -32768]
         
         self.q_world_offset = None 
+        self._suspended = False
+        
+    @property
+    def suspended(self):
+        return self._suspended
+        
+    @suspended.setter
+    def suspended(self, value):
+        self._suspended = value
+        if value:
+            logger.info(f"Controller {self.device.address}: Input processing SUSPENDED.")
+        else:
+            logger.info(f"Controller {self.device.address}: Input processing RESUMED.")
         
     def __repr__(self):
         return f"{CONTROLER_NAMES[self.controller_info.product_id]} : {self.device.address}"
@@ -426,15 +442,38 @@ class Controller:
         return await cls.create_from_device(device)
         
     async def disconnect(self):
+        if not getattr(self, 'interp_running', False) and not self.client:
+            return
+            
+        logger.info(f"Controller {self.device.address}: Suspending interpolation...")
         self.interp_running = False
+        
+        # Join the interpolation thread if it exists and is running
+        if hasattr(self, 'interp_thread') and self.interp_thread.is_alive():
+            logger.info(f"Controller {self.device.address}: Joining interpolation thread...")
+            self.interp_thread.join(timeout=0.5)
+            
         if self.client:
             if self.client.is_connected:
-                logger.info(f"Disconnecting Bluetooth from {self.device.address}...")
+                logger.info(f"Controller {self.device.address}: Disconnecting Bluetooth...")
                 try:
-                    await asyncio.wait_for(self.client.disconnect(), timeout=1.5)
-                except Exception:
-                    pass
+                    # Explicitly stop notifications to prevent WinRT background callbacks from firing 
+                    # after the event loop is closed, which causes RuntimeError.
+                    try:
+                        await self.client.stop_notify(INPUT_REPORT_UUID)
+                    except Exception:
+                        pass
+                    try:
+                        await self.client.stop_notify(COMMAND_RESPONSE_UUID)
+                    except Exception:
+                        pass
+                        
+                    # Faster timeout for sleep-time disconnection
+                    await asyncio.wait_for(self.client.disconnect(), timeout=2.0)
+                except Exception as e:
+                    logger.debug(f"Bluetooth disconnect error (ignored): {e}")
             self.client = None
+        logger.info(f"Controller {self.device.address}: Disconnected.")
 
     ### Commands & Features ###
 
@@ -507,6 +546,15 @@ class Controller:
 
     async def enable_input_notify_callback(self):
         def input_report_callback(sender, data):
+            if getattr(self, 'suspended', False) or getattr(self, '_is_suspending', False):
+                return
+            
+            # Debug log for the first few packets to see what's being sent on wake
+            if not hasattr(self, '_packet_count'): self._packet_count = 0
+            if self._packet_count < 3:
+                self._packet_count += 1
+                logger.debug(f"[{time.strftime('%H:%M:%S')}] Controller {self.device.address} first packet {self._packet_count}: {to_hex(data[3:6])}")
+                
             inputData = ControllerInputData(data, self.stick_calibration, self.second_stick_calibration)
             self.battery_voltage = inputData.battery_voltage
 

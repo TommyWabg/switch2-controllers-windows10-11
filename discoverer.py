@@ -22,11 +22,36 @@ UPDATE_CALLBACK = None
 DISCOVERER_LOOP = None
 DISCONNECT_CALLBACK = None
 IS_SHUTTING_DOWN = False
+DISCOVERY_LOCK = threading.Lock()
+_CURRENTLY_DISCOVERING = False
+_IS_SUSPENDING = False
 
 async def run_discovery(update_controllers_threadsafe, quit_event):
-    global VIRTUAL_CONTROLLERS, UPDATE_CALLBACK, DISCOVERER_LOOP, DISCONNECT_CALLBACK
+    global VIRTUAL_CONTROLLERS, UPDATE_CALLBACK, DISCOVERER_LOOP, DISCONNECT_CALLBACK, _CURRENTLY_DISCOVERING
+    
+    with DISCOVERY_LOCK:
+        if _CURRENTLY_DISCOVERING:
+            logger.warning("Discovery already running. Skipping...")
+            return
+        _CURRENTLY_DISCOVERING = True
+    
     UPDATE_CALLBACK = update_controllers_threadsafe
     DISCOVERER_LOOP = asyncio.get_running_loop()
+    
+    # NEW: Thoroughly cleanup stale controllers from previous session/sleep
+    # This ensures a fresh state every time the discovery loop starts.
+    logger.info("Discovery starting: Performing initial cleanup of stale controllers...")
+    for i, vc in enumerate(VIRTUAL_CONTROLLERS):
+        if vc is not None:
+            try:
+                # Force disconnect and destruction of virtual device
+                await vc.disconnect(is_suspending=False)
+            except Exception as e:
+                logger.error(f"Error in initial cleanup of controller {i}: {e}")
+            VIRTUAL_CONTROLLERS[i] = None
+    
+    if UPDATE_CALLBACK:
+        UPDATE_CALLBACK(list(VIRTUAL_CONTROLLERS))
     
     try:
         host_mac_value = convert_mac_string_to_value(bluetooth.read_local_bdaddr()[0])
@@ -42,7 +67,7 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
                 if vc is not None and await vc.remove_controller(controller):
                     VIRTUAL_CONTROLLERS[i] = None
             
-            if IS_SHUTTING_DOWN:
+            if IS_SHUTTING_DOWN or _IS_SUSPENDING:
                 return
                 
             reorder_controllers()
@@ -77,6 +102,11 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
                         slot_index = next(i for i, c in enumerate(VIRTUAL_CONTROLLERS) if c == None)
                         virtual_controller = VirtualController(slot_index + 1, disconnected_controller)
                         VIRTUAL_CONTROLLERS[slot_index] = virtual_controller
+                    else:
+                        # Re-using or replacing: Ensure old one is fully disconnected if it exists
+                        # (Especially important if we kept it alive during sleep)
+                        if isinstance(virtual_controller, VirtualController):
+                             await virtual_controller.disconnect(is_suspending=False)
                     
                     virtual_controller.add_controller(controller)
                 finally:
@@ -121,48 +151,87 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
             print("Presss a button on a paired controller, or hold sync button on an unpaired controller")
             await asyncio.get_event_loop().run_in_executor(None, quit_event.wait)
     finally:
-        for vc in VIRTUAL_CONTROLLERS:
-            if vc is not None:
-                await vc.disconnect()
+        with DISCOVERY_LOCK:
+            _CURRENTLY_DISCOVERING = False
+        import time
+        logger.info(f"[{time.strftime('%H:%M:%S')}] Discovery loop exited. Starting session cleanup...")
+        # Use a copy to avoid issues if the list is modified during iteration
+        vcs_to_disconnect = [vc for vc in VIRTUAL_CONTROLLERS if vc is not None]
+        if vcs_to_disconnect:
+            # CRITICAL: We now use is_suspending=False even during suspend
+            # to ensure the ViGEmBus handles are closed cleanly.
+            # Our "Triple Protection" in gui.py handles the wake-prevention.
+            await asyncio.gather(*[vc.disconnect(is_suspending=False) for vc in vcs_to_disconnect])
+        logger.info(f"[{time.strftime('%H:%M:%S')}] Discovery session cleanup complete.")
 
 def start_discoverer(update_controllers_threadsafe, quit_event):
     asyncio.run(run_discovery(update_controllers_threadsafe, quit_event))
 
 def reorder_controllers():
     global VIRTUAL_CONTROLLERS
-    active_vcs = []
-    for vc in VIRTUAL_CONTROLLERS:
-        if vc is not None:
-            active_vcs.append(vc)
-    
-    if not active_vcs:
-        return
+    with DISCOVERY_LOCK:
+        active_vcs = []
+        for vc in VIRTUAL_CONTROLLERS:
+            if vc is not None:
+                active_vcs.append(vc)
+        
+        if not active_vcs:
+            return
 
-    # Priority: Pro Controller > GameCube > Combined Joycon > Left Joycon > Right Joycon
-    def get_priority(vc):
-        if vc.is_single():
-            c = vc.controllers[0]
-            if c.is_pro_controller(): return 0
-            if c.controller_info.product_id == NSO_GAMECUBE_CONTROLLER_PID: return 1
-            if c.is_joycon_left(): return 3
-            if c.is_joycon_right(): return 4
-        else:
-            # Combined Joycon pair
-            return 2
-        return 5
+        # Priority: Pro Controller > GameCube > Combined Joycon > Left Joycon > Right Joycon
+        def get_priority(vc):
+            if vc.is_single():
+                c = vc.controllers[0]
+                if c.is_pro_controller(): return 0
+                if c.controller_info.product_id == NSO_GAMECUBE_CONTROLLER_PID: return 1
+                if c.is_joycon_left(): return 3
+                if c.is_joycon_right(): return 4
+            else:
+                # Combined Joycon pair
+                return 2
+            return 5
 
-    active_vcs.sort(key=get_priority)
-    
-    new_list = [None] * 8
-    for i, vc in enumerate(active_vcs):
-        new_list[i] = vc
-        vc.player_number = i + 1
-    
-    VIRTUAL_CONTROLLERS[:] = new_list
+        active_vcs.sort(key=get_priority)
+        
+        new_list = [None] * 8
+        for i, vc in enumerate(active_vcs):
+            new_list[i] = vc
+            vc.player_number = i + 1
+        
+        VIRTUAL_CONTROLLERS[:] = new_list
 
 def set_shutting_down(val):
     global IS_SHUTTING_DOWN
     IS_SHUTTING_DOWN = val
+
+def set_suspending(val):
+    global _IS_SUSPENDING
+    _IS_SUSPENDING = val
+    # The actual cleanup of VIRTUAL_CONTROLLERS is now handled 
+    # at the start of run_discovery() or via emergency_cleanup().
+
+def emergency_cleanup():
+    """Forcefully clear VIRTUAL_CONTROLLERS without waiting for a loop."""
+    global VIRTUAL_CONTROLLERS
+    logger.info("Emergency cleanup: Force clearing all stale controllers.")
+    for i in range(len(VIRTUAL_CONTROLLERS)):
+        vc = VIRTUAL_CONTROLLERS[i]
+        if vc is not None:
+            try:
+                vc.force_close()
+            except:
+                pass
+    VIRTUAL_CONTROLLERS[i] = None
+    
+    # Also reset the ViGEm bus handle to ensure driver stability
+    try:
+        from virtual_controller import reset_vigem_bus
+        reset_vigem_bus()
+    except Exception as e:
+        logger.debug(f"Reset bus in emergency_cleanup failed: {e}")
+        
+    if UPDATE_CALLBACK:
+        UPDATE_CALLBACK(list(VIRTUAL_CONTROLLERS))
 
 async def update_all_player_leds():
     for vc in VIRTUAL_CONTROLLERS:

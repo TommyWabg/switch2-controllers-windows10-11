@@ -3,6 +3,7 @@ import asyncio
 import threading
 import ctypes
 import logging
+import gc
 from controller import Controller, ControllerInputData, VibrationData
 from config import CONFIG, ButtonConfig, SWITCH_BUTTONS, XB_BUTTONS
 
@@ -46,6 +47,7 @@ class VirtualController:
         self._setup_vg_controller()
         
         self.state_lock = threading.Lock()
+        self._disconnect_lock = asyncio.Lock()
         self.running = True
         self.update_thread = threading.Thread(target=self._1000hz_loop, daemon=True)
         self.update_thread.start()
@@ -543,10 +545,10 @@ class VirtualController:
         return len(self.controllers) == 1
     
     def is_single_joycon_right(self):
-        return self.is_single() and self.controllers[0].is_joycon_right()
+        return self.is_single() and len(self.controllers) > 0 and self.controllers[0].is_joycon_right()
 
     def is_single_joycon_left(self):
-        return self.is_single() and self.controllers[0].is_joycon_left()
+        return self.is_single() and len(self.controllers) > 0 and self.controllers[0].is_joycon_left()
         
     async def update_leds(self):
         for c in self.controllers: await c.set_leds(self.player_number)
@@ -601,38 +603,112 @@ class VirtualController:
                         busp = self.vg_controller.vbus.get_busp()
                         devicep = self.vg_controller._devicep
                         vcli.vigem_target_ds4_update_ex_ptr(busp, devicep, ctypes.byref(self.report_ex))
-                    except Exception as e:
+                    except:
                         self.vg_controller.update()
                 else:
                     self.vg_controller.update()
+        
+        logger.info(f"Player {self.player_number}: Update loop thread finished.")
                 
-    async def disconnect(self):
+    def reset_inputs(self):
+        """Reset all virtual inputs to neutral/released state."""
+        with self.state_lock:
+            if self.mode == "Xbox":
+                self.report = vgamepad.XUSB_REPORT()
+            else:
+                # Reset DS4 report to default
+                self.report_ex = DS4_REPORT_EX()
+                self.report_ex.Report.bThumbLX = 128
+                self.report_ex.Report.bThumbLY = 128
+                self.report_ex.Report.bThumbRX = 128
+                self.report_ex.Report.bThumbRY = 128
+            logger.info(f"Player {self.player_number}: Virtual inputs reset to neutral.")
+
+    def force_close(self):
+        """Synchronously and forcefully close the virtual device handle."""
         self.running = False
-        if not self.controllers:
-            return
-
-        logger.info(f"Player {self.player_number}: Closing virtual device and disconnecting Bluetooth...")
-
-        if hasattr(self, 'vg_controller') and self.vg_controller is not None:
-            try:
-                self.vg_controller.unregister_notification()
-            except Exception:
-                pass
-            self.vg_controller = None
+        
+        # 1. Wait for the high-frequency update thread to terminate
+        if hasattr(self, 'update_thread') and self.update_thread.is_alive():
+            logger.info(f"Player {self.player_number}: Waiting for update thread to exit...")
+            self.update_thread.join(timeout=0.5)
             
-        disconnect_tasks = []
-        for c in list(self.controllers):
-            if hasattr(c, 'client') and c.client and c.client.is_connected:
-                disconnect_tasks.append(asyncio.create_task(c.disconnect()))
+        # 2. Use the lock to ensure no other thread (like BLE callback) is using the gamepad
+        with self.state_lock:
+            if hasattr(self, 'vg_controller') and self.vg_controller is not None:
+                logger.info(f"Player {self.player_number}: Forcefully destroying virtual device handle.")
+                try:
+                    # Crucial: unregister notifications to stop driver-level callbacks
+                    self.vg_controller.unregister_notification()
+                except Exception as e:
+                    logger.debug(f"Unregister notification failed: {e}")
                 
-        if disconnect_tasks:
-            await asyncio.gather(*disconnect_tasks)
+                # Explicitly clear the reference while holding the lock
+                # This triggers the destructor of the vgamepad object (vigem_target_remove)
+                self.vg_controller = None
+        
+        # 3. Force garbage collection to ensure driver resources are released NOW
+        gc.collect()
+
+    async def disconnect(self, timeout=3.0, is_suspending=False):
+        async with self._disconnect_lock:
+            if not getattr(self, 'running', False) and self.vg_controller is None and not self.controllers:
+                return
+                
+            self.running = False
+            import time
+            current_time = time.strftime("%H:%M:%S")
+            logger.info(f"[{current_time}] Player {self.player_number}: Starting disconnect sequence (is_suspending={is_suspending})...")
             
-        for c in list(self.controllers):
-            if self.on_disconnected_callback:
-                await self.on_disconnected_callback(c)
+            # Wait for the update thread to finish before proceeding with handle cleanup
+            if hasattr(self, 'update_thread') and self.update_thread.is_alive():
+                logger.info(f"Player {self.player_number}: Waiting for update thread to exit...")
+                # Increase timeout to ensure thread actually finishes before handle is cleared
+                self.update_thread.join(timeout=0.5)
+                if self.update_thread.is_alive():
+                    logger.warning(f"Player {self.player_number}: Update thread did not exit in time!")
+            
+            if not self.controllers and self.vg_controller is None:
+                return
+
+            logger.info(f"Player {self.player_number}: Cleaning up virtual device and physical connections...")
+            
+            with self.state_lock:
+                if hasattr(self, 'vg_controller') and self.vg_controller is not None:
+                    logger.info(f"Player {self.player_number}: Unregistering notifications and clearing vg_controller")
+                    try:
+                        self.vg_controller.unregister_notification()
+                    except Exception as e:
+                        logger.debug(f"Unregister notification failed: {e}")
+                    self.vg_controller = None
+            
+            # Explicitly trigger GC to help release driver handles
+            gc.collect()
                 
-        self.controllers.clear()
+            disconnect_tasks = []
+            for c in list(self.controllers):
+                if hasattr(c, 'client') and c.client and c.client.is_connected:
+                    logger.info(f"Player {self.player_number}: Disconnecting Bluetooth for {c.device.address}")
+                    disconnect_tasks.append(asyncio.create_task(c.disconnect()))
+                    
+            if disconnect_tasks:
+                try:
+                    # Await the actual disconnection tasks
+                    await asyncio.wait_for(asyncio.gather(*disconnect_tasks), timeout=timeout)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Player {self.player_number}: Bluetooth disconnection timed out")
+                except Exception as e:
+                    logger.error(f"Player {self.player_number}: Error during Bluetooth disconnection: {e}")
+                
+            for c in list(self.controllers):
+                if self.on_disconnected_callback:
+                    try:
+                        await self.on_disconnected_callback(c)
+                    except Exception:
+                        pass
+                    
+            self.controllers.clear()
+            logger.info(f"Player {self.player_number}: Cleanup complete.")
 
     def trigger_disconnect(self):
         if self.loop and self.loop.is_running():
@@ -658,3 +734,49 @@ class VirtualController:
             if getattr(self, 'running', True):
                 await self.init_added_controller(self.controllers[0])
             return False
+
+def reset_vigem_bus():
+    """
+    Force-reset the global ViGEm bus handle used by vgamepad.
+    This is critical for preventing BSOD (0x10D) during sleep/wake cycles,
+    as stale bus handles often cause driver-level crashes on wake.
+    """
+    import vgamepad.win.virtual_gamepad as vvg
+    import logging
+    import gc
+    local_logger = logging.getLogger(__name__)
+    
+    local_logger.info("Resetting ViGEm bus handle for power state transition.")
+    try:
+        # 1. Clear the global singleton reference
+        if hasattr(vvg, 'VBUS'):
+            old_bus = vvg.VBUS
+            vvg.VBUS = None
+            # Explicitly delete to encourage immediate cleanup
+            if old_bus:
+                try:
+                    # Access private members to force disconnect if __del__ hasn't run yet
+                    import vgamepad.win.vigem_client as vcli
+                    if hasattr(old_bus, '_busp') and old_bus._busp:
+                        local_logger.debug("Manually disconnecting stale ViGEm bus.")
+                        vcli.vigem_disconnect(old_bus._busp)
+                        vcli.vigem_free(old_bus._busp)
+                        old_bus._busp = None
+                except:
+                    pass
+                del old_bus
+        
+        # 2. Collect garbage to ensure VBus.__del__ runs and driver handles are closed
+        gc.collect()
+        
+        # 3. Create a fresh VBus instance for the next use cycle
+        # We only do this if we are not currently suspending
+        from discoverer import _IS_SUSPENDING
+        if not _IS_SUSPENDING:
+            vvg.VBUS = vvg.VBus()
+            local_logger.info("New ViGEm bus handle initialized.")
+        else:
+            local_logger.info("ViGEm bus cleared for suspend. Will re-init on wake.")
+            
+    except Exception as e:
+        local_logger.error(f"Failed to reset ViGEm bus: {e}")

@@ -235,7 +235,8 @@ class Config:
             
             with open(self.config_file_path, 'w', encoding='utf-8') as f:
                 yaml.dump(data, f, default_flow_style=False)
-            logger.info("Config saved successfully.")
+            import time
+            logger.info(f"[{time.strftime('%H:%M:%S')}] Config saved successfully to {self.config_file_path}")
         except Exception as e:
             logger.error(f"Failed to save config: {e}")
     
